@@ -9,6 +9,9 @@ from typing import Optional
 import asyncio
 import json
 import time
+import threading
+import sys
+from console import run_console
 
 # Load configuration
 config = Config("config.toml")
@@ -121,6 +124,15 @@ async def startup_event():
         print("Printer status table initialized")
     finally:
         session.close()
+
+    # Start interactive console in a separate thread
+    console_thread = threading.Thread(
+        target=run_console,
+        args=(config, SessionLocal),
+        daemon=False
+    )
+    console_thread.start()
+    print("Interactive console started. Type 'help' for commands.")
 
 
 @app.on_event("shutdown")
