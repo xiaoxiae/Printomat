@@ -278,6 +278,7 @@ async def websocket_printer_endpoint(websocket: WebSocket):
 
                     # Send to printer
                     message_data = {
+                        "id": next_message.id,
                         "content": next_message.content,
                         "type": next_message.type
                     }

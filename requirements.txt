@@ -6,3 +6,4 @@ tomli_w
 pydantic
 websockets
 tabulate
+requests
