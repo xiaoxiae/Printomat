@@ -1,9 +1,11 @@
 fastapi
-uvicorn[standard]
+jinja2
+pydantic
+python-multipart
+requests
 sqlalchemy
+tabulate
 tomli
 tomli_w
-pydantic
+uvicorn[standard]
 websockets
-tabulate
-requests

@@ -1,0 +1,7 @@
+<div id="printForm" class="error">
+    {% if error == "rate_limited" %}
+        <p>Please wait {{ minutes_until_retry }} more minutes or you'll break my printer.</p>
+    {% else %}
+        <p>Unexpected failure, please <a href="mailto:tomas@slama.dev">shoot me an email</a>.</p>
+    {% endif %}
+</div>

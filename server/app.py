@@ -1,5 +1,7 @@
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, status, Form
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from pathlib import Path
 from .config import Config
@@ -31,8 +33,15 @@ Base.metadata.create_all(bind=engine)
 # Initialize FastAPI app
 app = FastAPI(title="Receipt Printer Server")
 
+# Setup Jinja2 templates
+templates_dir = Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(templates_dir))
+
 # Queue configuration
 queue_max_size = config.get_queue_max_size()
+
+# Global printer connection status
+printer_connected = False
 
 
 # Pydantic models
@@ -136,40 +145,43 @@ async def health_check():
     return {"status": "ok"}
 
 
-@app.post("/submit")
-async def submit_print_request(request_data: SubmitRequest, request: Request):
-    """Submit a print request."""
-    global message_queue
+@app.get("/form")
+async def get_form(request: Request):
+    """Serve the submission form."""
+    return templates.TemplateResponse("form.html", {"request": request})
 
+
+async def _process_submit_request(content: str, type: str, token: Optional[str], request: Request, is_form_submission: bool = False):
+    """Core submission logic shared by both JSON and form endpoints."""
     session = SessionLocal()
     try:
         client_ip = get_client_ip(request)
 
         # Check if token is provided and validate it
         token_data = None
-        if request_data.token:
-            token_data = config.get_friendship_token_by_value(request_data.token)
+        if token:
+            token_data = config.get_friendship_token_by_value(token)
             if not token_data:
                 # Invalid token provided
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "error": "invalid_token",
-                        "message": "Invalid friendship token"
-                    }
-                )
+                response = {
+                    "error": "invalid_token",
+                    "message": "Invalid friendship token"
+                }
+                if is_form_submission:
+                    return response, 400, True
+                return JSONResponse(status_code=400, content=response)
 
         # If not a friendship token user, check rate limit
         if not token_data:
             is_allowed, minutes_until_retry = check_rate_limit(client_ip, session)
             if not is_allowed:
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "error": "rate_limited",
-                        "message": f"Try again in {minutes_until_retry} minutes"
-                    }
-                )
+                response = {
+                    "error": "rate_limited",
+                    "message": f"Try again in {minutes_until_retry} minutes"
+                }
+                if is_form_submission:
+                    return response, 429, True
+                return JSONResponse(status_code=429, content=response)
 
         # Check if queue is full (only for non-priority users)
         if not token_data:
@@ -177,18 +189,18 @@ async def submit_print_request(request_data: SubmitRequest, request: Request):
                 PrintRequest.status.in_(["queued", "printing"])
             ).count()
             if queued_count >= queue_max_size:
-                return JSONResponse(
-                    status_code=503,
-                    content={
-                        "error": "queue_full",
-                        "message": "Queue is currently full, try again later"
-                    }
-                )
+                response = {
+                    "error": "queue_full",
+                    "message": "Queue is currently full, try again later"
+                }
+                if is_form_submission:
+                    return response, 503, True
+                return JSONResponse(status_code=503, content=response)
 
         # Create print request in database
         print_request = PrintRequest(
-            content=request_data.content,
-            type=request_data.type,
+            content=content,
+            type=type,
             submitter_ip=client_ip,
             is_priority=bool(token_data),
             friendship_token_label=token_data.get("label") if token_data else None,
@@ -199,27 +211,131 @@ async def submit_print_request(request_data: SubmitRequest, request: Request):
         session.commit()
         session.refresh(print_request)
 
+        # Get queue position (for all users, in case printer is down)
+        position = get_queue_position(print_request.id, session)
+        estimated_wait = position * 1  # 1 minute per position
+
         # If friendship token user, they should be printed immediately
         # In the spec, priority users bypass queue but still need to be queued
         # They will just be at the front of the queue
         if token_data:
-            return {
+            response = {
                 "status": "printing_immediately",
-                "message": token_data.get("message", "Thanks for the message!")
+                "message": token_data.get("message", "Thanks for the message!"),
+                "position": position,
+                "estimated_wait_minutes": estimated_wait,
+                "printer_connected": printer_connected
             }
+            if is_form_submission:
+                return response, 200, False
+            return response
 
         # Regular user: return queue position
-        position = get_queue_position(print_request.id, session)
-        estimated_wait = position * 1  # 1 minute per position
-
-        return {
+        response = {
             "status": "queued",
             "position": position,
-            "estimated_wait_minutes": estimated_wait
+            "estimated_wait_minutes": estimated_wait,
+            "printer_connected": printer_connected
         }
+        if is_form_submission:
+            return response, 200, False
+        return response
 
     finally:
         session.close()
+
+
+@app.post("/submit")
+async def submit_print_request(request: Request):
+    """Submit a print request via JSON or form data."""
+    content_type = request.headers.get("content-type", "")
+
+    if "application/json" in content_type:
+        # Handle JSON request
+        try:
+            request_data = await request.json()
+            content = request_data.get("content", "")
+            type_ = request_data.get("type", "")
+            token = request_data.get("token")
+
+            if not content or not type_:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "invalid_request", "message": "Missing content or type"}
+                )
+
+            return await _process_submit_request(content, type_, token, request, is_form_submission=False)
+        except json.JSONDecodeError:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "invalid_json", "message": "Invalid JSON"}
+            )
+    else:
+        # Handle form submission (redirect to result page)
+        try:
+            form_data = await request.form()
+            content = form_data.get("content", "")
+            type_ = form_data.get("type", "")
+            token = form_data.get("token") or None
+
+            if not content or not type_:
+                return templates.TemplateResponse(
+                    "error.html",
+                    {
+                        "request": request,
+                        "error": "invalid_request",
+                        "message": "Missing content or type"
+                    }
+                )
+
+            response_data, _, is_error = await _process_submit_request(content, type_, token, request, is_form_submission=True)
+
+            # Render appropriate template based on response
+            # For HTMX form swaps, we always return 200 so the swap happens
+            if is_error:
+                error = response_data.get("error", "unknown_error")
+                message = response_data.get("message", "An error occurred")
+                minutes_until_retry = 0
+
+                if error == "rate_limited":
+                    minutes_until_retry = int(message.split()[-2]) if "minutes" in message else 0
+
+                return templates.TemplateResponse(
+                    "error.html",
+                    {
+                        "request": request,
+                        "error": error,
+                        "minutes_until_retry": minutes_until_retry
+                    }
+                )
+            else:
+                status = response_data.get("status", "unknown")
+                is_priority = status == "printing_immediately"
+                estimated_wait_minutes = response_data.get("estimated_wait_minutes", "?")
+                position = response_data.get("position", "?")
+                message = response_data.get("message", "Thanks for the message!")
+                printer_is_connected = response_data.get("printer_connected", False)
+
+                return templates.TemplateResponse(
+                    "success.html",
+                    {
+                        "request": request,
+                        "is_priority": is_priority,
+                        "message": message,
+                        "estimated_wait_minutes": estimated_wait_minutes,
+                        "position": position,
+                        "printer_connected": printer_is_connected
+                    }
+                )
+        except Exception as e:
+            return templates.TemplateResponse(
+                "error.html",
+                {
+                    "request": request,
+                    "error": "internal_error",
+                    "message": f"Internal server error: {str(e)}"
+                }
+            )
 
 
 @app.websocket("/ws")
@@ -230,6 +346,8 @@ async def websocket_printer_endpoint(websocket: WebSocket):
     Priority messages are sent immediately (with 1-second check interval).
     Regular messages respect the configured send interval (60 seconds by default).
     """
+    global printer_connected
+
     # Get auth token from query parameters
     auth_token = websocket.query_params.get("token")
     expected_token = config.get_printer_token()
@@ -241,6 +359,7 @@ async def websocket_printer_endpoint(websocket: WebSocket):
         return
 
     await websocket.accept()
+    printer_connected = True
     print("Printer client connected successfully")
 
     send_interval = config.get_queue_send_interval()
@@ -327,8 +446,10 @@ async def websocket_printer_endpoint(websocket: WebSocket):
                 pass
 
     except WebSocketDisconnect:
+        printer_connected = False
         print("Printer client disconnected")
     except Exception as e:
+        printer_connected = False
         print(f"WebSocket error: {e}")
 
 

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt Printer - Submit Print Job</title>
+    <script src="https://unpkg.com/htmx.org"></script>
+</head>
+<body>
+    <form id="printForm" hx-post="/submit" hx-target="#printForm" hx-swap="outerHTML">
+        <fieldset>
+            <legend>Submit Content to Print</legend>
+
+            <div>
+                <label for="content">Content:</label>
+                <textarea id="content" name="content" required placeholder="Enter the content you want to print..."></textarea>
+            </div>
+
+            <input type="hidden" name="type" value="text">
+
+            <div>
+                <label for="token">Friendship Token (optional):</label>
+                <input type="password" id="token" name="token" placeholder="Enter token if you have one">
+            </div>
+
+            <div>
+                <button type="submit">Submit</button>
+            </div>
+        </fieldset>
+    </form>
+</body>
+</html>
