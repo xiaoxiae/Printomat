@@ -226,6 +226,8 @@ async def websocket_printer_endpoint(websocket: WebSocket):
     """WebSocket endpoint for printer client.
 
     Handles both sending queued messages and receiving acknowledgments.
+    Priority messages are sent immediately (with 1-second check interval).
+    Regular messages respect the configured send interval (60 seconds by default).
     """
     # Get auth token from query parameters
     auth_token = websocket.query_params.get("token")
@@ -249,34 +251,43 @@ async def websocket_printer_endpoint(websocket: WebSocket):
             current_time = time.time()
             time_since_last_send = current_time - last_send_time
 
-            # Check if it's time to send next message (respecting send interval)
-            if time_since_last_send >= send_interval:
-                session = SessionLocal()
-                try:
-                    # Get next queued message (priority first, then FIFO)
-                    next_message = session.query(PrintRequest).filter(
-                        PrintRequest.status == "queued"
-                    ).order_by(
-                        PrintRequest.is_priority.desc(),
-                        PrintRequest.created_at.asc()
-                    ).first()
+            session = SessionLocal()
+            try:
+                # Get next queued message (priority first, then FIFO)
+                next_message = session.query(PrintRequest).filter(
+                    PrintRequest.status == "queued"
+                ).order_by(
+                    PrintRequest.is_priority.desc(),
+                    PrintRequest.created_at.asc()
+                ).first()
 
-                    if next_message:
-                        # Update status to printing
-                        next_message.status = "printing"
-                        session.commit()
+                # Determine if we should send this message
+                should_send = False
+                if next_message:
+                    if next_message.is_priority:
+                        # Priority messages: send immediately (no cooldown)
+                        should_send = True
+                    elif time_since_last_send >= send_interval:
+                        # Regular messages: respect send interval
+                        should_send = True
 
-                        # Send to printer
-                        message_data = {
-                            "content": next_message.content,
-                            "type": next_message.type
-                        }
-                        await websocket.send_json(message_data)
-                        currently_printing_id = next_message.id
-                        print(f"Sent message {next_message.id} to printer client")
-                        last_send_time = current_time
-                finally:
-                    session.close()
+                if should_send and next_message:
+                    # Update status to printing
+                    next_message.status = "printing"
+                    session.commit()
+
+                    # Send to printer
+                    message_data = {
+                        "content": next_message.content,
+                        "type": next_message.type
+                    }
+                    await websocket.send_json(message_data)
+                    currently_printing_id = next_message.id
+                    is_priority = next_message.is_priority
+                    print(f"Sent message {next_message.id} to printer client (priority={is_priority})")
+                    last_send_time = current_time
+            finally:
+                session.close()
 
             # Wait for acknowledgment with timeout (check for acks frequently)
             try:
@@ -312,7 +323,6 @@ async def websocket_printer_endpoint(websocket: WebSocket):
                 currently_printing_id = None
 
             except asyncio.TimeoutError:
-                # No ack received, continue waiting for send interval
                 pass
 
     except WebSocketDisconnect:
