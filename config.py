@@ -1,4 +1,5 @@
 import tomli
+import tomli_w
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -22,6 +23,11 @@ class Config:
     def reload(self) -> None:
         """Reload configuration from file (for hot-reloading tokens)."""
         self.load()
+
+    def _save(self) -> None:
+        """Save configuration to file."""
+        with open(self.config_path, "w") as f:
+            f.write(tomli_w.dumps(self._config))
 
     def get_database_url(self) -> str:
         """Build SQLite connection URL from config."""
@@ -57,3 +63,33 @@ class Config:
     def get_rate_limit_cooldown_hours(self) -> int:
         """Get rate limit cooldown in hours."""
         return self._config.get("rate_limit", {}).get("user_cooldown_hours", 1)
+
+    # Token management methods
+    def add_friendship_token(self, label: str, name: str, message: str, token: str) -> None:
+        """Add a new friendship token to the configuration."""
+        if "friendship_tokens" not in self._config:
+            self._config["friendship_tokens"] = {}
+
+        if label in self._config["friendship_tokens"]:
+            raise ValueError(f"Token with label '{label}' already exists")
+
+        self._config["friendship_tokens"][label] = {
+            "name": name,
+            "label": label,
+            "message": message,
+            "token": token
+        }
+        self._save()
+        self.reload()
+
+    def remove_friendship_token(self, label: str) -> None:
+        """Remove a friendship token from the configuration."""
+        if "friendship_tokens" not in self._config:
+            return
+
+        if label not in self._config["friendship_tokens"]:
+            raise ValueError(f"Token with label '{label}' not found")
+
+        del self._config["friendship_tokens"][label]
+        self._save()
+        self.reload()

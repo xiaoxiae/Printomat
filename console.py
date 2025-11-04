@@ -2,24 +2,18 @@
 """Interactive console for printomat server administration."""
 
 import cmd
-import sys
 import secrets
-from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional
-import tomli_w
 from tabulate import tabulate
 from config import Config
-from models import get_session_local, get_database_engine, PrintRequest
+from models import PrintRequest
 
 
 class PrintomatConsole(cmd.Cmd):
     """Interactive console for managing the printer server."""
 
     intro = """
-╔══════════════════════════════════════════════════════════════╗
-║         Receipt Printer Server - Administration Console      ║
-╚══════════════════════════════════════════════════════════════╝
+Receipt Printer Server - Administration Console
 
 Type 'help' to see available commands.
 Type 'help <command>' for detailed command help.
@@ -32,7 +26,6 @@ Type 'quit' to exit.
         super().__init__(*args, **kwargs)
         self.config = config
         self.SessionLocal = session_local
-        self.config_path = Path("config.toml")
 
     # Token Management Commands
 
@@ -47,54 +40,92 @@ Type 'quit' to exit.
         try:
             name = input("Name: ").strip()
             if not name:
-                print("❌ Name cannot be empty")
+                print("ERROR: Name cannot be empty")
                 return
 
-            label = input("Label (e.g., alice_token): ").strip()
+            label = input("Label: ").strip()
             if not label:
-                print("❌ Label cannot be empty")
+                print("ERROR: Label cannot be empty")
                 return
 
-            message = input("Message (printed with receipt): ").strip()
+            message = input("Message: ").strip()
             if not message:
-                print("❌ Message cannot be empty")
+                print("ERROR: Message cannot be empty")
                 return
 
-            # Check if label already exists
-            existing_tokens = self.config.get_friendship_tokens()
-            if label in existing_tokens:
-                print(f"❌ Token with label '{label}' already exists")
-                return
+            # Auto-generate token (8 chars)
+            token = secrets.token_hex(4)
 
-            # Auto-generate token
-            token = secrets.token_urlsafe(32)
-
-            # Add to config
-            self.config.reload()  # Ensure we have latest config
-            config_dict = dict(self.config._config)
-
-            if "friendship_tokens" not in config_dict:
-                config_dict["friendship_tokens"] = {}
-
-            config_dict["friendship_tokens"][label] = {
-                "name": name,
-                "label": label,
-                "message": message,
-                "token": token
-            }
-
-            # Write back to file
-            with open(self.config_path, "w") as f:
-                f.write(tomli_w.dumps(config_dict))
-
-            self.config.reload()
-            print(f"✅ Token added successfully!")
-            print(f"   Name: {name}")
-            print(f"   Label: {label}")
-            print(f"   Token: {token}")
+            # Add to config via config class
+            try:
+                self.config.add_friendship_token(label, name, message, token)
+                print("Token added successfully!")
+                print(f"   Name: {name}")
+                print(f"   Label: {label}")
+                print(f"   Token: {token}")
+            except ValueError as e:
+                print(f"ERROR: {e}")
 
         except KeyboardInterrupt:
-            print("\n❌ Cancelled")
+            print("\nCancelled")
+
+    def do_edit_token(self, arg):
+        """Edit an existing friendship token.
+
+        Usage: edit_token <label>
+        """
+        if not arg:
+            print("ERROR: Please specify a label to edit")
+            return
+
+        search_label = arg.strip()
+        tokens = self.config.get_friendship_tokens()
+
+        # Find the token data by matching the label field
+        target_label = None
+        target_data = None
+        for key, token_data in tokens.items():
+            if token_data.get("label") == search_label:
+                target_label = key
+                target_data = token_data
+                break
+
+        if not target_label:
+            print(f"ERROR: Token not found: {search_label}")
+            return
+
+        print(f"\n--- Edit Friendship Token: {search_label} ---")
+
+        try:
+            # Pre-fill with existing values
+            name = input(f"Name [{target_data.get('name')}]: ").strip() or target_data.get('name')
+            label = input(f"Label [{target_data.get('label')}]: ").strip() or target_data.get('label')
+            message = input(f"Message [{target_data.get('message')}]: ").strip() or target_data.get('message')
+
+            if not name or not label or not message:
+                print("ERROR: Fields cannot be empty")
+                return
+
+            # Keep existing token or generate new one
+            keep_token = input(f"Keep existing token [{target_data.get('token')}]? (y/n): ").strip().lower()
+            if keep_token == 'y' or keep_token == '':
+                token = target_data.get('token')
+            else:
+                token = secrets.token_hex(4)
+
+            # Remove old token and add new one
+            try:
+                self.config.remove_friendship_token(target_label)
+                self.config.add_friendship_token(label, name, message, token)
+                print("Token updated successfully!")
+                print(f"   Name: {name}")
+                print(f"   Label: {label}")
+                print(f"   Token: {token}")
+            except ValueError as e:
+                print(f"ERROR: {e}")
+
+        except KeyboardInterrupt:
+            print("\nCancelled")
 
     def do_list_tokens(self, arg):
         """List all friendship tokens."""
@@ -109,11 +140,10 @@ Type 'quit' to exit.
             label = token_data.get("label", key)
             name = token_data.get("name", "N/A")
             token_val = token_data.get("token", "N/A")
-            # Show first 10 chars of token for security
-            token_display = token_val[:10] + "..." if len(token_val) > 10 else token_val
-            rows.append([label, name, token_display])
+            message = token_data.get("message", "")[:40]
+            rows.append([label, name, token_val[:8], message])
 
-        print("\n" + tabulate(rows, headers=["Label", "Name", "Token"], tablefmt="grid"))
+        print("\n" + tabulate(rows, headers=["Label", "Name", "Token", "Message"], tablefmt="grid"))
 
     def do_remove_token(self, arg):
         """Remove a friendship token by label.
@@ -121,43 +151,37 @@ Type 'quit' to exit.
         Usage: remove_token <label>
         """
         if not arg:
-            print("❌ Please specify a label to remove")
+            print("ERROR: Please specify a label to remove")
             return
 
         search_label = arg.strip()
         tokens = self.config.get_friendship_tokens()
 
-        # Find the token key by matching the label field
-        target_key = None
+        # Find the token data by matching the label field
+        target_label = None
+        target_name = None
         for key, token_data in tokens.items():
             if token_data.get("label") == search_label:
-                target_key = key
+                target_label = key
+                target_name = token_data.get("name", "N/A")
                 break
 
-        if not target_key:
-            print(f"❌ Token not found: {search_label}")
+        if not target_label:
+            print(f"ERROR: Token not found: {search_label}")
             return
 
         # Confirm deletion
-        name = tokens[target_key].get("name", "N/A")
-        confirm = input(f"Remove token '{name}' ({search_label})? (y/n): ").strip().lower()
+        confirm = input(f"Remove token '{target_name}' ({search_label})? (y/n): ").strip().lower()
         if confirm != 'y':
-            print("❌ Cancelled")
+            print("Cancelled")
             return
 
-        # Remove from config
-        self.config.reload()
-        config_dict = dict(self.config._config)
-
-        if "friendship_tokens" in config_dict:
-            del config_dict["friendship_tokens"][target_key]
-
-        # Write back to file
-        with open(self.config_path, "w") as f:
-            f.write(tomli_w.dumps(config_dict))
-
-        self.config.reload()
-        print(f"✅ Token removed: {name}")
+        # Remove from config via config class
+        try:
+            self.config.remove_friendship_token(target_label)
+            print(f"Token removed: {target_name}")
+        except ValueError as e:
+            print(f"ERROR: {e}")
 
     # Queue Commands
 
@@ -174,7 +198,7 @@ Type 'quit' to exit.
             ).all()
 
             if not queued:
-                print("\nQueue is empty ✓")
+                print("\nQueue is empty")
                 return
 
             rows = []
@@ -229,16 +253,6 @@ Type 'quit' to exit.
             rows = []
             for req in results:
                 status = req.status
-                # Add emoji for status
-                if status == "printed":
-                    status = "✅ printed"
-                elif status == "failed":
-                    status = "❌ failed"
-                elif status == "queued":
-                    status = "⏳ queued"
-                elif status == "printing":
-                    status = "🖨️  printing"
-
                 created = req.created_at.strftime("%Y-%m-%d %H:%M:%S")
                 preview = req.content[:30].replace("\n", " ")
                 rows.append([req.id, status, req.type, req.submitter_ip, created, preview])
@@ -255,7 +269,6 @@ Type 'quit' to exit.
 
     def do_quit(self, arg):
         """Exit the console."""
-        print("\nGoodbye!")
         return True
 
     def emptyline(self):
