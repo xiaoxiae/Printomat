@@ -1,0 +1,25 @@
+[database]
+path = "receipt_printer.db"
+
+[printer]
+auth_token = "secret-printer-token-here"
+
+[friendship_tokens]
+[friendship_tokens.token1]
+name = "Alice"
+label = "alice_token"
+message = "Hey Alice, thanks for the message!"
+token = "alice-secret-123"
+
+[friendship_tokens.token2]
+name = "Bob"
+label = "bob_token"
+message = "Bob! Always great to hear from you!"
+token = "bob-secret-456"
+
+[queue]
+max_size = 1000
+send_interval_seconds = 60
+
+[rate_limit]
+user_cooldown_hours = 1
