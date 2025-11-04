@@ -21,6 +21,14 @@ class PrintRequest(Base):
     error_message = Column(Text, nullable=True)
 
 
+class PrinterStatus(Base):
+    __tablename__ = "printer_status"
+
+    id = Column(Integer, primary_key=True, index=True)
+    is_connected = Column(Boolean, default=False)
+    connected_at = Column(DateTime, nullable=True)
+
+
 def get_database_engine(db_url: str, connect_args=None):
     """Create and return a database engine."""
     if connect_args:

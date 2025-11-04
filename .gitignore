@@ -1,6 +1,6 @@
 __pycache__/
 venv
+test_*
 
 config.toml
 *.db
-
