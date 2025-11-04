@@ -2,8 +2,8 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from pathlib import Path
-from config import Config
-from models import Base, get_database_engine, get_session_local, PrintRequest
+from .config import Config
+from .models import Base, get_database_engine, get_session_local, PrintRequest
 from datetime import datetime, timedelta
 from typing import Optional
 import asyncio
@@ -11,10 +11,11 @@ import json
 import time
 import threading
 import sys
-from console import run_console
+from .console import run_console
 
-# Load configuration
-config = Config("config.toml")
+# Load configuration (look for config.toml in the server directory)
+config_path = Path(__file__).parent / "config.toml"
+config = Config(str(config_path))
 
 # Initialize database
 db_url = config.get_database_url()
@@ -278,7 +279,6 @@ async def websocket_printer_endpoint(websocket: WebSocket):
 
                     # Send to printer
                     message_data = {
-                        "id": next_message.id,
                         "content": next_message.content,
                         "type": next_message.type
                     }

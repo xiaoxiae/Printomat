@@ -5,8 +5,8 @@ import cmd
 import secrets
 from typing import Optional
 from tabulate import tabulate
-from config import Config
-from models import PrintRequest
+from .config import Config
+from .models import PrintRequest
 
 
 class PrintomatConsole(cmd.Cmd):
