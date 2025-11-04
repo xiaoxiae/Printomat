@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from pathlib import Path
 from config import Config
-from models import Base, get_database_engine, get_session_local, PrintRequest, PrinterStatus
+from models import Base, get_database_engine, get_session_local, PrintRequest
 from datetime import datetime, timedelta
 from typing import Optional
 import asyncio
@@ -112,18 +112,6 @@ async def startup_event():
     """Initialize on server startup."""
     print("Server starting up...")
     print(f"Database: {config.get_database_url()}")
-
-    # Initialize printer status if not exists
-    session = SessionLocal()
-    try:
-        printer_status = session.query(PrinterStatus).first()
-        if not printer_status:
-            printer_status = PrinterStatus(is_connected=False)
-            session.add(printer_status)
-            session.commit()
-        print("Printer status table initialized")
-    finally:
-        session.close()
 
     # Start interactive console in a separate thread
     console_thread = threading.Thread(
@@ -238,7 +226,6 @@ async def websocket_printer_endpoint(websocket: WebSocket):
     """WebSocket endpoint for printer client.
 
     Handles both sending queued messages and receiving acknowledgments.
-    Only allows one active printer connection at a time.
     """
     # Get auth token from query parameters
     auth_token = websocket.query_params.get("token")
@@ -249,26 +236,6 @@ async def websocket_printer_endpoint(websocket: WebSocket):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
         print("Printer client connection rejected: invalid token")
         return
-
-    # Check if printer is already connected via database
-    session = SessionLocal()
-    try:
-        printer_status = session.query(PrinterStatus).first()
-        if printer_status and printer_status.is_connected:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Another printer is already connected")
-            print("Printer client connection rejected: already connected")
-            return
-
-        # Mark printer as connected
-        if printer_status:
-            printer_status.is_connected = True
-            printer_status.connected_at = datetime.utcnow()
-        else:
-            printer_status = PrinterStatus(is_connected=True, connected_at=datetime.utcnow())
-            session.add(printer_status)
-        session.commit()
-    finally:
-        session.close()
 
     await websocket.accept()
     print("Printer client connected successfully")
@@ -352,16 +319,6 @@ async def websocket_printer_endpoint(websocket: WebSocket):
         print("Printer client disconnected")
     except Exception as e:
         print(f"WebSocket error: {e}")
-    finally:
-        # Mark printer as disconnected in database
-        session = SessionLocal()
-        try:
-            printer_status = session.query(PrinterStatus).first()
-            if printer_status:
-                printer_status.is_connected = False
-                session.commit()
-        finally:
-            session.close()
 
 
 if __name__ == "__main__":

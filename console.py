@@ -10,7 +10,7 @@ from typing import Optional
 import tomli_w
 from tabulate import tabulate
 from config import Config
-from models import get_session_local, get_database_engine, PrintRequest, PrinterStatus
+from models import get_session_local, get_database_engine, PrintRequest
 
 
 class PrintomatConsole(cmd.Cmd):
