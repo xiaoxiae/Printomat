@@ -1,7 +1,24 @@
 <div id="printForm" class="error">
     {% if error == "rate_limited" %}
-        <p>Please wait {{ minutes_until_retry }} more minutes or you'll break my printer.</p>
+    <p>
+        Please wait {{ minutes_until_retry }} more minutes or you'll break my
+        printer.
+    </p>
+    {% elif error == "invalid_token" %}
+    <p>Invalid friendship token provided, you are not a friend.</p>
+    {% elif error == "invalid_request" %}
+    <p>Invalid request, stop trying to hack my server you scallywag.</p>
+    {% elif error == "queue_full" %}
+    <p>The queue is currently full. This should not be possible.</p>
+    {% elif error == "database_error" %}
+    <p>
+        A database error occurred, please
+        <a href="mailto:tomas@slama.dev">shoot me an email</a>.
+    </p>
     {% else %}
-        <p>Unexpected failure, please <a href="mailto:tomas@slama.dev">shoot me an email</a>.</p>
+    <p>
+        Unexpected failure, please
+        <a href="mailto:tomas@slama.dev">shoot me an email</a>.
+    </p>
     {% endif %}
 </div>
