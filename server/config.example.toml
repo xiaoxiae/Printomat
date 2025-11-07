@@ -4,16 +4,14 @@ path = "receipt_printer.db"
 [printer]
 auth_token = "secret-printer-token-here"
 
-[friendship_tokens]
-[friendship_tokens.token1]
+# Friendship tokens
+# Token values will be auto-generated if omitted
+[[friendship_tokens]]
 name = "Alice"
-label = "alice_token"
 message = "Hey Alice, thanks for the message!"
-token = "alice-secret-123"
 
-[friendship_tokens.token2]
+[[friendship_tokens]]
 name = "Bob"
-label = "bob_token"
 message = "Bob! Always great to hear from you!"
 token = "bob-secret-456"
 

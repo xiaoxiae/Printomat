@@ -32,8 +32,8 @@ Type 'quit' to exit.
     def do_add_token(self, arg):
         """Add a new friendship token.
 
-        Interactive: prompts for name, label, and message.
-        Token is auto-generated.
+        Interactive: prompts for name and message.
+        Label and token are auto-generated from name.
         """
         print("\n--- Add New Friendship Token ---")
 
@@ -43,25 +43,21 @@ Type 'quit' to exit.
                 print("ERROR: Name cannot be empty")
                 return
 
-            label = input("Label: ").strip()
-            if not label:
-                print("ERROR: Label cannot be empty")
-                return
-
             message = input("Message: ").strip()
             if not message:
                 print("ERROR: Message cannot be empty")
                 return
 
-            # Auto-generate token (8 chars)
+            # Auto-generate token and label
             token = secrets.token_hex(4)
+            label = self.config.generate_label_from_name(name)
 
             # Add to config via config class
             try:
-                self.config.add_friendship_token(label, name, message, token)
+                self.config.add_friendship_token(name, message, token)
                 print("Token added successfully!")
                 print(f"   Name: {name}")
-                print(f"   Label: {label}")
+                print(f"   Label (auto-generated): {label}")
                 print(f"   Token: {token}")
             except ValueError as e:
                 print(f"ERROR: {e}")
@@ -72,37 +68,37 @@ Type 'quit' to exit.
     def do_edit_token(self, arg):
         """Edit an existing friendship token.
 
-        Usage: edit_token <label>
+        Usage: edit_token <name>
+        Allows editing message and token. Name change will update the label.
         """
         if not arg:
-            print("ERROR: Please specify a label to edit")
+            print("ERROR: Please specify a name to edit")
             return
 
-        search_label = arg.strip()
+        search_name = arg.strip()
         tokens = self.config.get_friendship_tokens()
 
-        # Find the token data by matching the label field
+        # Find the token data by matching the name field
         target_label = None
         target_data = None
-        for key, token_data in tokens.items():
-            if token_data.get("label") == search_label:
-                target_label = key
+        for token_data in tokens:
+            if token_data.get("name") == search_name:
+                target_label = token_data.get("label")
                 target_data = token_data
                 break
 
-        if not target_label:
-            print(f"ERROR: Token not found: {search_label}")
+        if not target_data:
+            print(f"ERROR: Token not found: {search_name}")
             return
 
-        print(f"\n--- Edit Friendship Token: {search_label} ---")
+        print(f"\n--- Edit Friendship Token: {search_name} ---")
 
         try:
             # Pre-fill with existing values
             name = input(f"Name [{target_data.get('name')}]: ").strip() or target_data.get('name')
-            label = input(f"Label [{target_data.get('label')}]: ").strip() or target_data.get('label')
             message = input(f"Message [{target_data.get('message')}]: ").strip() or target_data.get('message')
 
-            if not name or not label or not message:
+            if not name or not message:
                 print("ERROR: Fields cannot be empty")
                 return
 
@@ -113,13 +109,24 @@ Type 'quit' to exit.
             else:
                 token = secrets.token_hex(4)
 
+            # Generate new label from updated name
+            new_label = self.config.generate_label_from_name(name)
+
+            # If name changed, label will be different
+            if new_label != target_label:
+                # Check if new label already exists
+                for existing_token in tokens:
+                    if existing_token.get("label") == new_label and existing_token.get("label") != target_label:
+                        print(f"ERROR: Token with name '{name}' (label: {new_label}) already exists")
+                        return
+
             # Remove old token and add new one
             try:
                 self.config.remove_friendship_token(target_label)
-                self.config.add_friendship_token(label, name, message, token)
+                self.config.add_friendship_token(name, message, token)
                 print("Token updated successfully!")
                 print(f"   Name: {name}")
-                print(f"   Label: {label}")
+                print(f"   Label (auto-generated): {new_label}")
                 print(f"   Token: {token}")
             except ValueError as e:
                 print(f"ERROR: {e}")
@@ -136,42 +143,42 @@ Type 'quit' to exit.
             return
 
         rows = []
-        for key, token_data in tokens.items():
-            label = token_data.get("label", key)
+        for token_data in tokens:
             name = token_data.get("name", "N/A")
+            label = token_data.get("label", "N/A")
             token_val = token_data.get("token", "N/A")
             message = token_data.get("message", "")[:40]
-            rows.append([label, name, token_val[:8], message])
+            rows.append([name, label, token_val[:8], message])
 
-        print("\n" + tabulate(rows, headers=["Label", "Name", "Token", "Message"], tablefmt="grid"))
+        print("\n" + tabulate(rows, headers=["Name", "Label (auto-generated)", "Token", "Message"], tablefmt="grid"))
 
     def do_remove_token(self, arg):
-        """Remove a friendship token by label.
+        """Remove a friendship token by name.
 
-        Usage: remove_token <label>
+        Usage: remove_token <name>
         """
         if not arg:
-            print("ERROR: Please specify a label to remove")
+            print("ERROR: Please specify a name to remove")
             return
 
-        search_label = arg.strip()
+        search_name = arg.strip()
         tokens = self.config.get_friendship_tokens()
 
-        # Find the token data by matching the label field
+        # Find the token data by matching the name field
         target_label = None
         target_name = None
-        for key, token_data in tokens.items():
-            if token_data.get("label") == search_label:
-                target_label = key
+        for token_data in tokens:
+            if token_data.get("name") == search_name:
+                target_label = token_data.get("label")
                 target_name = token_data.get("name", "N/A")
                 break
 
         if not target_label:
-            print(f"ERROR: Token not found: {search_label}")
+            print(f"ERROR: Token not found: {search_name}")
             return
 
         # Confirm deletion
-        confirm = input(f"Remove token '{target_name}' ({search_label})? (y/n): ").strip().lower()
+        confirm = input(f"Remove token '{target_name}' ({target_label})? (y/n): ").strip().lower()
         if confirm != 'y':
             print("Cancelled")
             return

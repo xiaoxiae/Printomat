@@ -204,6 +204,7 @@ async def _process_submit_request(content: str, type: str, token: Optional[str],
             submitter_ip=client_ip,
             is_priority=bool(token_data),
             friendship_token_label=token_data.get("label") if token_data else None,
+            friendship_token_name=token_data.get("name") if token_data else None,
             status="queued"  # Always start as queued, will be sent by WebSocket handler
         )
 
@@ -396,8 +397,8 @@ async def websocket_printer_endpoint(websocket: WebSocket):
                     next_message.status = "printing"
                     session.commit()
 
-                    # Determine sender: friendship token name or IP address
-                    from_name = next_message.friendship_token_label if next_message.is_priority else next_message.submitter_ip
+                    # Determine sender: friend name or IP address
+                    from_name = next_message.friendship_token_name or next_message.submitter_ip
 
                     # Send to printer
                     message_data = {
