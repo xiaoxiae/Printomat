@@ -1,0 +1,14 @@
+[server]
+url = "ws://localhost:8000/ws"
+auth_token = "secret-printer-token-here"
+
+[printer]
+# USB vendor ID (hexadecimal or decimal)
+# Examples: vendor_id = "0x0471" or vendor_id = 1137
+# Leave commented out to run in simulation mode (no printer required)
+# vendor_id = "0x0471"
+
+# USB product ID (hexadecimal or decimal)
+# Examples: product_id = "0x0055" or product_id = 85
+# Leave commented out to run in simulation mode
+# product_id = "0x0055"
