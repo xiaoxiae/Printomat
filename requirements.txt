@@ -1,7 +1,9 @@
 fastapi
 jinja2
 pydantic
+python-escpos
 python-multipart
+pyusb
 requests
 sqlalchemy
 tabulate

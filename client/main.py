@@ -12,36 +12,44 @@ import asyncio
 import websockets
 import json
 import sys
-import argparse
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 import time
+from pathlib import Path
+from .config import Config
+
+try:
+    from escpos.printer import Usb
+    HAS_ESCPOS = True
+except ImportError:
+    HAS_ESCPOS = False
 
 
 class PrinterClient:
     """WebSocket client for receiving and processing print jobs."""
 
-    def __init__(self, server_url: str, auth_token: str, output_dir: Optional[str] = None, verbose: bool = True):
+    def __init__(self, server_url: str, auth_token: str,
+                 printer_vendor_id: Optional[int] = None, printer_product_id: Optional[int] = None):
         """Initialize the printer client.
 
         Args:
             server_url: WebSocket server URL (e.g., ws://localhost:8000/ws)
             auth_token: Authentication token for the printer
-            output_dir: Directory to save printed jobs (optional)
-            verbose: Print detailed logging
+            printer_vendor_id: USB vendor ID for ESC/POS printer (e.g., 0x0471)
+            printer_product_id: USB product ID for ESC/POS printer (e.g., 0x0055)
         """
         self.server_url = server_url
         self.auth_token = auth_token
-        self.output_dir = Path(output_dir) if output_dir else None
-        self.verbose = verbose
         self.job_count = 0
         self.success_count = 0
         self.failure_count = 0
+        self.printer = None
+        self.printer_vendor_id = printer_vendor_id
+        self.printer_product_id = printer_product_id
 
-        # Create output directory if specified
-        if self.output_dir:
-            self.output_dir.mkdir(parents=True, exist_ok=True)
+        # Initialize ESC/POS printer if credentials provided
+        if self.printer_vendor_id and self.printer_product_id:
+            self._initialize_printer()
 
     def log(self, message: str, level: str = "INFO", end: str = "\n"):
         """Log a message with timestamp."""
@@ -55,59 +63,107 @@ class PrinterClient:
         else:
             symbol = "→"
 
-        if self.verbose or level in ["ERROR", "WARN"]:
-            print(f"[{timestamp}] {symbol} {message}", end=end)
+        print(f"[{timestamp}] {symbol} {message}", end=end)
 
     def get_server_address(self) -> str:
         """Extract server address from URL for display."""
         # Parse ws://localhost:8000/ws -> localhost:8000
         return self.server_url.replace("ws://", "").replace("wss://", "").split("/")[0]
 
-    async def print_job(self, job_id: int, content: str, job_type: str) -> bool:
-        """Simulate printing a job and return success/failure.
+    def _initialize_printer(self) -> bool:
+        """Initialize connection to ESC/POS printer via USB.
+
+        Returns:
+            True if printer initialized successfully, False otherwise
+        """
+        if not HAS_ESCPOS:
+            self.log("python-escpos not installed. Run: pip install python-escpos pyusb", level="ERROR")
+            return False
+
+        try:
+            self.printer = Usb(self.printer_vendor_id, self.printer_product_id)
+            self.log(f"Printer initialized (vendor: 0x{self.printer_vendor_id:04x}, product: 0x{self.printer_product_id:04x})", level="SUCCESS")
+            return True
+        except Exception as e:
+            self.log(f"Failed to initialize printer: {e}", level="ERROR")
+            self.log("Tip: Check USB vendor and product IDs with: lsusb", level="WARN")
+            self.printer = None
+            return False
+
+    def _format_message(self, content: str, from_name: str, date_str: str, job_type: str) -> str:
+        """Format a message with headers before printing.
+
+        Args:
+            content: The message content
+            from_name: Sender (IP or friendship token name)
+            date_str: ISO format datetime string
+            job_type: Type of content
+
+        Returns:
+            Formatted message string
+        """
+        # Parse ISO datetime to readable format
+        try:
+            dt = datetime.fromisoformat(date_str)
+            readable_date = dt.strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, AttributeError):
+            readable_date = date_str
+
+        separator = "-" * 40
+        formatted = f"""{separator}
+From: {from_name}
+Date: {readable_date}
+
+{content}
+
+{separator}"""
+        return formatted
+
+    async def print_job(self, job_id: int, content: str, job_type: str,
+                       from_name: Optional[str] = None, date_str: Optional[str] = None) -> bool:
+        """Print a job to the ESC/POS printer (or simulate if not available).
 
         Args:
             job_id: Unique job identifier
             content: Content to print
             job_type: Type of content (text, image, etc.)
+            from_name: Sender (IP or friendship token name)
+            date_str: ISO format datetime string
 
         Returns:
             True if print succeeded, False otherwise
         """
         self.job_count += 1
 
-        # Save to file if output directory specified
-        if self.output_dir:
-            filename = self.output_dir / f"job_{job_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            try:
-                with open(filename, "w") as f:
-                    f.write(f"Job ID: {job_id}\n")
-                    f.write(f"Type: {job_type}\n")
-                    f.write(f"Timestamp: {datetime.now().isoformat()}\n")
-                    f.write("=" * 40 + "\n")
-                    f.write(content)
-                self.log(f"Saved job {job_id} to {filename}")
-            except Exception as e:
-                self.log(f"Failed to save job {job_id}: {e}", level="ERROR")
-                return False
+        # Format message with headers if metadata is provided
+        if from_name and date_str:
+            formatted_content = self._format_message(content, from_name, date_str, job_type)
+        else:
+            formatted_content = content
 
-        # Simulate printing with a brief delay
-        # In a real implementation, this would interact with actual printer hardware
-        print_time = 0.5  # seconds
-        self.log(f"Printing job {job_id} ({job_type}): {len(content)} chars... ", level="INFO", end="")
-        await asyncio.sleep(print_time)
-        print()  # newline after the in-place message
+        # Print to actual device if available, otherwise simulate
+        try:
+            if self.printer:
+                await asyncio.sleep(0.1)  # Brief delay for I/O
+                # Send to printer
+                self.printer.text(formatted_content)
+                self.printer.text("\n\n")  # Add blank lines at end
+                self.printer.cut()  # Cut the paper
+            else:
+                # Simulate printing without device
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            self.log(f"Failed to print job {job_id}: {e}", level="ERROR")
+            self.failure_count += 1
+            return False
 
         self.success_count += 1
-        self.log(f"Job {job_id} printed successfully", level="SUCCESS")
         return True
 
     async def run(self):
         """Main client loop - connect and process jobs."""
         self.log(f"Printer Client Starting")
         self.log(f"Server: {self.get_server_address()}")
-        self.log(f"Output directory: {self.output_dir or '(none - memory only)'}")
-        self.log("")
 
         uri = f"{self.server_url}?token={self.auth_token}"
 
@@ -120,7 +176,6 @@ class PrinterClient:
                 async with websockets.connect(uri) as websocket:
                     connection_attempts = 0
                     self.log(f"Connected to server successfully", level="SUCCESS")
-                    self.log("")
 
                     # Process messages indefinitely
                     while True:
@@ -132,11 +187,11 @@ class PrinterClient:
                             job_id = job_data.get("id")
                             content = job_data.get("content", "")
                             job_type = job_data.get("type", "text")
-
-                            self.log(f"Received job (type={job_type}, size={len(content)} chars)")
+                            from_name = job_data.get("from")
+                            date_str = job_data.get("date")
 
                             # Print the job
-                            success = await self.print_job(job_id, content, job_type)
+                            success = await self.print_job(job_id, content, job_type, from_name, date_str)
 
                             # Send acknowledgment
                             if success:
@@ -145,8 +200,6 @@ class PrinterClient:
                                 ack = {"status": "failed", "error_message": "Print failed"}
 
                             await websocket.send(json.dumps(ack))
-                            self.log(f"Sent acknowledgment (status={'success' if success else 'failed'})")
-                            self.log("")
 
                         except json.JSONDecodeError as e:
                             self.log(f"Failed to parse message: {e}", level="ERROR")
@@ -168,18 +221,14 @@ class PrinterClient:
                 self.log(f"Retrying in 5 seconds...")
                 await asyncio.sleep(5)
 
-    def print_stats(self):
-        """Print statistics about processed jobs."""
-        self.log("")
-        self.log("=" * 50)
-        self.log("Statistics")
-        self.log("=" * 50)
-        self.log(f"Total jobs received: {self.job_count}")
-        self.log(f"Successful prints: {self.success_count}")
-        self.log(f"Failed prints: {self.failure_count}")
-        if self.job_count > 0:
-            success_rate = (self.success_count / self.job_count) * 100
-            self.log(f"Success rate: {success_rate:.1f}%")
+    def cleanup(self):
+        """Clean up resources, particularly closing the printer connection."""
+        if self.printer:
+            try:
+                self.printer.close()
+                self.log("Printer connection closed", level="INFO")
+            except Exception as e:
+                self.log(f"Error closing printer: {e}", level="WARN")
 
     async def run_with_signal_handler(self):
         """Run the client with graceful shutdown on Ctrl+C."""
@@ -188,59 +237,22 @@ class PrinterClient:
         except KeyboardInterrupt:
             self.log("", level="WARN")
             self.log("Shutting down...", level="WARN")
-            self.print_stats()
+            self.cleanup()
             sys.exit(0)
 
 
 def main():
-    """Command-line interface for the printer client."""
-    parser = argparse.ArgumentParser(
-        description="Receipt Printer Desktop Client",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Connect to local server with default settings
-  python printer_client.py
-
-  # Connect to remote server with custom token
-  python printer_client.py --server ws://192.168.1.100:8000/ws --token my-secret-token
-
-  # Save printed jobs to a directory
-  python printer_client.py --output-dir ./printed-jobs
-
-  # Quiet mode (only show errors)
-  python printer_client.py --quiet
-        """
-    )
-
-    parser.add_argument(
-        "--server",
-        default="ws://localhost:8000/ws",
-        help="WebSocket server URL (default: ws://localhost:8000/ws)"
-    )
-    parser.add_argument(
-        "--token",
-        default="secret-printer-token-here",
-        help="Printer authentication token (default: secret-printer-token-here)"
-    )
-    parser.add_argument(
-        "--output-dir",
-        help="Directory to save printed jobs (optional)"
-    )
-    parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Quiet mode - only show errors"
-    )
-
-    args = parser.parse_args()
+    """Initialize and run the printer client."""
+    # Load configuration (look for config.toml in the client directory)
+    config_path = Path(__file__).parent / "config.toml"
+    config = Config(str(config_path))
 
     # Create and run client
     client = PrinterClient(
-        server_url=args.server,
-        auth_token=args.token,
-        output_dir=args.output_dir,
-        verbose=not args.quiet
+        server_url=config.get_server_url(),
+        auth_token=config.get_auth_token(),
+        printer_vendor_id=config.get_printer_vendor_id(),
+        printer_product_id=config.get_printer_product_id()
     )
 
     # Run with signal handler for graceful shutdown

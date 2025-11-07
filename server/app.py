@@ -396,10 +396,15 @@ async def websocket_printer_endpoint(websocket: WebSocket):
                     next_message.status = "printing"
                     session.commit()
 
+                    # Determine sender: friendship token name or IP address
+                    from_name = next_message.friendship_token_label if next_message.is_priority else next_message.submitter_ip
+
                     # Send to printer
                     message_data = {
                         "content": next_message.content,
-                        "type": next_message.type
+                        "type": next_message.type,
+                        "from": from_name,
+                        "date": datetime.utcnow().isoformat()
                     }
                     await websocket.send_json(message_data)
                     currently_printing_id = next_message.id
