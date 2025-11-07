@@ -13,7 +13,18 @@ import json
 import time
 import threading
 import sys
+import logging
 from .console import run_console
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Load configuration (look for config.toml in the server directory)
 config_path = Path(__file__).parent / "config.toml"
@@ -46,8 +57,8 @@ printer_connected = False
 
 # Pydantic models
 class SubmitRequest(BaseModel):
-    content: str
-    type: str
+    message: Optional[str] = None  # Text message (optional)
+    image: Optional[str] = None    # Base64-encoded image (optional)
     token: Optional[str] = None
 
 
@@ -120,23 +131,26 @@ def get_queue_position(request_id: int, session) -> int:
 @app.on_event("startup")
 async def startup_event():
     """Initialize on server startup."""
-    print("Server starting up...")
-    print(f"Database: {config.get_database_url()}")
+    logger.info("Server starting up...")
+    logger.info(f"Database: {config.get_database_url()}")
 
-    # Start interactive console in a separate thread
-    console_thread = threading.Thread(
-        target=run_console,
-        args=(config, SessionLocal),
-        daemon=False
-    )
-    console_thread.start()
-    print("Interactive console started. Type 'help' for commands.")
+    try:
+        # Start interactive console in a separate thread
+        console_thread = threading.Thread(
+            target=run_console,
+            args=(config, SessionLocal),
+            daemon=False
+        )
+        console_thread.start()
+        logger.info("Interactive console started. Type 'help' for commands.")
+    except Exception as e:
+        logger.error(f"Failed to start interactive console: {e}", exc_info=True)
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up on server shutdown."""
-    print("Server shutting down...")
+    logger.info("Server shutting down...")
 
 
 @app.get("/health")
@@ -151,11 +165,23 @@ async def get_form(request: Request):
     return templates.TemplateResponse("form.html", {"request": request})
 
 
-async def _process_submit_request(content: str, type: str, token: Optional[str], request: Request, is_form_submission: bool = False):
+async def _process_submit_request(message: Optional[str], image: Optional[str], token: Optional[str], request: Request, is_form_submission: bool = False):
     """Core submission logic shared by both JSON and form endpoints."""
     session = SessionLocal()
     try:
+        logger.debug(f"Processing submit request from {request.client.host if request.client else 'unknown'}")
         client_ip = get_client_ip(request)
+
+        # Validate that at least message or image is provided
+        if not message and not image:
+            logger.debug(f"Invalid request from {client_ip}: no message or image provided")
+            response = {
+                "error": "invalid_request",
+                "message": "At least message or image must be provided"
+            }
+            if is_form_submission:
+                return response, 400, True
+            return JSONResponse(status_code=400, content=response)
 
         # Check if token is provided and validate it
         token_data = None
@@ -163,6 +189,7 @@ async def _process_submit_request(content: str, type: str, token: Optional[str],
             token_data = config.get_friendship_token_by_value(token)
             if not token_data:
                 # Invalid token provided
+                logger.warning(f"Invalid friendship token provided from {client_ip}")
                 response = {
                     "error": "invalid_token",
                     "message": "Invalid friendship token"
@@ -170,11 +197,13 @@ async def _process_submit_request(content: str, type: str, token: Optional[str],
                 if is_form_submission:
                     return response, 400, True
                 return JSONResponse(status_code=400, content=response)
+            logger.debug(f"Valid friendship token used from {client_ip} (label: {token_data.get('label')})")
 
         # If not a friendship token user, check rate limit
         if not token_data:
             is_allowed, minutes_until_retry = check_rate_limit(client_ip, session)
             if not is_allowed:
+                logger.warning(f"Rate limit exceeded for {client_ip} (retry in {minutes_until_retry} minutes)")
                 response = {
                     "error": "rate_limited",
                     "message": f"Try again in {minutes_until_retry} minutes"
@@ -189,6 +218,7 @@ async def _process_submit_request(content: str, type: str, token: Optional[str],
                 PrintRequest.status.in_(["queued", "printing"])
             ).count()
             if queued_count >= queue_max_size:
+                logger.warning(f"Queue full: rejected request from {client_ip} (current queue: {queued_count}/{queue_max_size})")
                 response = {
                     "error": "queue_full",
                     "message": "Queue is currently full, try again later"
@@ -197,20 +227,39 @@ async def _process_submit_request(content: str, type: str, token: Optional[str],
                     return response, 503, True
                 return JSONResponse(status_code=503, content=response)
 
-        # Create print request in database
-        print_request = PrintRequest(
-            content=content,
-            type=type,
-            submitter_ip=client_ip,
-            is_priority=bool(token_data),
-            friendship_token_label=token_data.get("label") if token_data else None,
-            friendship_token_name=token_data.get("name") if token_data else None,
-            status="queued"  # Always start as queued, will be sent by WebSocket handler
-        )
+        # Determine content type
+        if message and image:
+            content_type = "mixed"
+        elif image:
+            content_type = "image"
+        else:
+            content_type = "text"
 
-        session.add(print_request)
-        session.commit()
-        session.refresh(print_request)
+        # Create print request in database
+        try:
+            print_request = PrintRequest(
+                type=content_type,
+                message_content=message,
+                image_content=image,
+                submitter_ip=client_ip,
+                is_priority=bool(token_data),
+                friendship_token_label=token_data.get("label") if token_data else None,
+                friendship_token_name=token_data.get("name") if token_data else None,
+                status="queued"  # Always start as queued, will be sent by WebSocket handler
+            )
+
+            session.add(print_request)
+            session.commit()
+            session.refresh(print_request)
+        except Exception as e:
+            logger.error(f"Failed to create print request from {client_ip}: {e}", exc_info=True)
+            response = {
+                "error": "database_error",
+                "message": "Failed to process request. Please try again later."
+            }
+            if is_form_submission:
+                return response, 500, True
+            return JSONResponse(status_code=500, content=response)
 
         # Get queue position (for all users, in case printer is down)
         position = get_queue_position(print_request.id, session)
@@ -220,6 +269,7 @@ async def _process_submit_request(content: str, type: str, token: Optional[str],
         # In the spec, priority users bypass queue but still need to be queued
         # They will just be at the front of the queue
         if token_data:
+            logger.info(f"Priority request queued from {client_ip} (request_id: {print_request.id}, type: {content_type})")
             response = {
                 "status": "printing_immediately",
                 "message": token_data.get("message", "Thanks for the message!"),
@@ -232,6 +282,7 @@ async def _process_submit_request(content: str, type: str, token: Optional[str],
             return response
 
         # Regular user: return queue position
+        logger.info(f"Regular request queued from {client_ip} (request_id: {print_request.id}, position: {position}, type: {content_type})")
         response = {
             "status": "queued",
             "position": position,
@@ -255,17 +306,11 @@ async def submit_print_request(request: Request):
         # Handle JSON request
         try:
             request_data = await request.json()
-            content = request_data.get("content", "")
-            type_ = request_data.get("type", "")
+            message = request_data.get("message")
+            image = request_data.get("image")
             token = request_data.get("token")
 
-            if not content or not type_:
-                return JSONResponse(
-                    status_code=400,
-                    content={"error": "invalid_request", "message": "Missing content or type"}
-                )
-
-            return await _process_submit_request(content, type_, token, request, is_form_submission=False)
+            return await _process_submit_request(message, image, token, request, is_form_submission=False)
         except json.JSONDecodeError:
             return JSONResponse(
                 status_code=400,
@@ -275,21 +320,11 @@ async def submit_print_request(request: Request):
         # Handle form submission (redirect to result page)
         try:
             form_data = await request.form()
-            content = form_data.get("content", "")
-            type_ = form_data.get("type", "")
+            message = form_data.get("message")
+            image = form_data.get("image")
             token = form_data.get("token") or None
 
-            if not content or not type_:
-                return templates.TemplateResponse(
-                    "error.html",
-                    {
-                        "request": request,
-                        "error": "invalid_request",
-                        "message": "Missing content or type"
-                    }
-                )
-
-            response_data, _, is_error = await _process_submit_request(content, type_, token, request, is_form_submission=True)
+            response_data, _, is_error = await _process_submit_request(message, image, token, request, is_form_submission=True)
 
             # Render appropriate template based on response
             # For HTMX form swaps, we always return 200 so the swap happens
@@ -329,12 +364,14 @@ async def submit_print_request(request: Request):
                     }
                 )
         except Exception as e:
+            client_ip = get_client_ip(request)
+            logger.error(f"Unexpected error in form submission from {client_ip}: {e}", exc_info=True)
             return templates.TemplateResponse(
                 "error.html",
                 {
                     "request": request,
                     "error": "internal_error",
-                    "message": f"Internal server error: {str(e)}"
+                    "message": "Internal server error. Please try again later."
                 }
             )
 
@@ -355,13 +392,13 @@ async def websocket_printer_endpoint(websocket: WebSocket):
 
     # Authenticate
     if not auth_token or auth_token != expected_token:
+        logger.warning(f"Printer client connection rejected: invalid/missing token (provided: {bool(auth_token)})")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
-        print("Printer client connection rejected: invalid token")
         return
 
     await websocket.accept()
     printer_connected = True
-    print("Printer client connected successfully")
+    logger.info(f"Printer client connected successfully (remote: {websocket.client})")
 
     send_interval = config.get_queue_send_interval()
     last_send_time = time.time()
@@ -393,35 +430,50 @@ async def websocket_printer_endpoint(websocket: WebSocket):
                         should_send = True
 
                 if should_send and next_message:
-                    # Update status to printing
-                    next_message.status = "printing"
-                    session.commit()
+                    try:
+                        # Update status to printing
+                        next_message.status = "printing"
+                        session.commit()
 
-                    # Determine sender: friend name or IP address
-                    from_name = next_message.friendship_token_name or next_message.submitter_ip
+                        # Determine sender: friend name or IP address
+                        from_name = next_message.friendship_token_name or next_message.submitter_ip
 
-                    # Send to printer
-                    message_data = {
-                        "content": next_message.content,
-                        "type": next_message.type,
-                        "from": from_name,
-                        "date": datetime.utcnow().isoformat()
-                    }
-                    await websocket.send_json(message_data)
-                    currently_printing_id = next_message.id
-                    is_priority = next_message.is_priority
-                    print(f"Sent message {next_message.id} to printer client (priority={is_priority})")
-                    last_send_time = current_time
+                        # Send to printer
+                        message_data = {
+                            "from": from_name,
+                            "date": datetime.utcnow().isoformat()
+                        }
+                        # Include optional message and/or image fields
+                        if next_message.message_content:
+                            message_data["message"] = next_message.message_content
+                        if next_message.image_content:
+                            message_data["image"] = next_message.image_content
+
+                        await websocket.send_json(message_data)
+                        currently_printing_id = next_message.id
+                        is_priority = next_message.is_priority
+                        logger.info(f"Sent message {next_message.id} to printer client (priority={is_priority}, from={from_name})")
+                        last_send_time = current_time
+                    except Exception as e:
+                        logger.error(f"Failed to send message {next_message.id} to printer: {e}", exc_info=True)
+                        next_message.status = "failed"
+                        next_message.error_message = f"Server error sending to printer: {str(e)}"
+                        session.commit()
             finally:
                 session.close()
 
             # Wait for acknowledgment with timeout (check for acks frequently)
             try:
                 ack_text = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
-                ack_data = json.loads(ack_text)
+
+                try:
+                    ack_data = json.loads(ack_text)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse acknowledgment JSON: {e}. Received: {ack_text}")
+                    continue
 
                 if currently_printing_id is None:
-                    print("Received acknowledgment but no message is currently printing")
+                    logger.warning(f"Received acknowledgment but no message is currently printing: {ack_data}")
                     continue
 
                 # Update database based on acknowledgment
@@ -433,16 +485,20 @@ async def websocket_printer_endpoint(websocket: WebSocket):
 
                     if print_req:
                         if ack_data.get("status") == "success":
-                            print(f"Printer acknowledged success for message {currently_printing_id}")
+                            logger.info(f"Printer acknowledged success for message {currently_printing_id}")
                             print_req.status = "printed"
                             print_req.printed_at = datetime.utcnow()
                         else:
                             error_msg = ack_data.get("error_message", "Unknown error")
-                            print(f"Printer reported failure for message {currently_printing_id}: {error_msg}")
+                            logger.warning(f"Printer reported failure for message {currently_printing_id}: {error_msg}")
                             print_req.status = "failed"
                             print_req.printed_at = datetime.utcnow()
                             print_req.error_message = error_msg
                         session.commit()
+                    else:
+                        logger.error(f"Received acknowledgment for unknown message ID {currently_printing_id}")
+                except Exception as e:
+                    logger.error(f"Failed to update print request {currently_printing_id} after acknowledgment: {e}", exc_info=True)
                 finally:
                     session.close()
 
@@ -450,13 +506,15 @@ async def websocket_printer_endpoint(websocket: WebSocket):
 
             except asyncio.TimeoutError:
                 pass
+            except Exception as e:
+                logger.error(f"Unexpected error while waiting for acknowledgment: {e}", exc_info=True)
 
     except WebSocketDisconnect:
         printer_connected = False
-        print("Printer client disconnected")
+        logger.info("Printer client disconnected")
     except Exception as e:
         printer_connected = False
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

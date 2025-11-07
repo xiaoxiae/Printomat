@@ -10,8 +10,9 @@ class PrintRequest(Base):
     __tablename__ = "print_requests"
 
     id = Column(Integer, primary_key=True, index=True)
-    content = Column(Text, nullable=False)
     type = Column(String(50), nullable=False)
+    message_content = Column(Text, nullable=True)  # Text message (optional)
+    image_content = Column(Text, nullable=True)  # Base64-encoded image (optional)
     submitter_ip = Column(String(45), nullable=False, index=True)
     is_priority = Column(Boolean, default=False)
     friendship_token_label = Column(String(100), nullable=True)
