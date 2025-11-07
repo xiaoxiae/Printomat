@@ -47,6 +47,10 @@ class PrinterClient:
         self.printer_vendor_id = printer_vendor_id
         self.printer_product_id = printer_product_id
 
+        # Initialize debug print directory (relative to client module location)
+        self.debug_print_dir = Path(__file__).parent / "print"
+        self.debug_print_dir.mkdir(exist_ok=True)
+
         # Initialize ESC/POS printer if credentials provided
         if self.printer_vendor_id and self.printer_product_id:
             self._initialize_printer()
@@ -69,6 +73,19 @@ class PrinterClient:
         """Extract server address from URL for display."""
         # Parse ws://localhost:8000/ws -> localhost:8000
         return self.server_url.replace("ws://", "").replace("wss://", "").split("/")[0]
+
+    def _save_debug_print(self, content: str) -> None:
+        """Save debug print to file with datetime name.
+
+        Args:
+            content: The formatted content to save
+        """
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMdd_HHMMSS_mmm
+            filename = self.debug_print_dir / f"{timestamp}.txt"
+            filename.write_text(content)
+        except Exception as e:
+            self.log(f"Failed to save debug print: {e}", level="WARN")
 
     def _initialize_printer(self) -> bool:
         """Initialize connection to ESC/POS printer via USB.
@@ -140,6 +157,9 @@ Date: {readable_date}
             formatted_content = self._format_message(content, from_name, date_str, job_type)
         else:
             formatted_content = content
+
+        # Save debug print regardless of printer connection status
+        self._save_debug_print(formatted_content)
 
         # Print to actual device if available, otherwise simulate
         try:
