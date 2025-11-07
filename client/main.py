@@ -12,11 +12,19 @@ import asyncio
 import websockets
 import json
 import sys
+import logging
 from datetime import datetime
 from typing import Optional
 import time
 from pathlib import Path
 from .config import Config
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 
 try:
     from escpos.printer import Usb
@@ -46,6 +54,7 @@ class PrinterClient:
         self.printer = None
         self.printer_vendor_id = printer_vendor_id
         self.printer_product_id = printer_product_id
+        self.logger = logging.getLogger(__name__)
 
         # Initialize debug print directory (relative to client module location)
         self.debug_print_dir = Path(__file__).parent / "print"
@@ -54,25 +63,6 @@ class PrinterClient:
         # Initialize ESC/POS printer if credentials provided
         if self.printer_vendor_id and self.printer_product_id:
             self._initialize_printer()
-
-    def log(self, message: str, level: str = "INFO", end: str = "\n"):
-        """Log a message with timestamp."""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if level == "ERROR":
-            symbol = "✗"
-        elif level == "SUCCESS":
-            symbol = "✓"
-        elif level == "WARN":
-            symbol = "!"
-        else:
-            symbol = "→"
-
-        print(f"[{timestamp}] {symbol} {message}", end=end)
-
-    def get_server_address(self) -> str:
-        """Extract server address from URL for display."""
-        # Parse ws://localhost:8000/ws -> localhost:8000
-        return self.server_url.replace("ws://", "").replace("wss://", "").split("/")[0]
 
     def _save_debug_print(self, content: str) -> None:
         """Save debug print to file with datetime name.
@@ -85,7 +75,7 @@ class PrinterClient:
             filename = self.debug_print_dir / f"{timestamp}.txt"
             filename.write_text(content)
         except Exception as e:
-            self.log(f"Failed to save debug print: {e}", level="WARN")
+            self.logger.warning(f"Failed to save debug print: {e}")
 
     def _initialize_printer(self) -> bool:
         """Initialize connection to ESC/POS printer via USB.
@@ -94,16 +84,16 @@ class PrinterClient:
             True if printer initialized successfully, False otherwise
         """
         if not HAS_ESCPOS:
-            self.log("python-escpos not installed. Run: pip install python-escpos pyusb", level="ERROR")
+            self.logger.error("python-escpos not installed. Run: pip install python-escpos pyusb")
             return False
 
         try:
             self.printer = Usb(self.printer_vendor_id, self.printer_product_id)
-            self.log(f"Printer initialized (vendor: 0x{self.printer_vendor_id:04x}, product: 0x{self.printer_product_id:04x})", level="SUCCESS")
+            self.logger.info(f"Printer initialized (vendor: 0x{self.printer_vendor_id:04x}, product: 0x{self.printer_product_id:04x})")
             return True
         except Exception as e:
-            self.log(f"Failed to initialize printer: {e}", level="ERROR")
-            self.log("Tip: Check USB vendor and product IDs with: lsusb", level="WARN")
+            self.logger.error(f"Failed to initialize printer: {e}")
+            self.logger.warning("Tip: Check USB vendor and product IDs with: lsusb")
             self.printer = None
             return False
 
@@ -136,12 +126,12 @@ Date: {readable_date}
 {separator}"""
         return formatted
 
-    async def print_job(self, job_id: int, content: str, job_type: str,
+    async def print_job(self, job_id: Optional[int], content: str, job_type: str,
                        from_name: Optional[str] = None, date_str: Optional[str] = None) -> bool:
         """Print a job to the ESC/POS printer (or simulate if not available).
 
         Args:
-            job_id: Unique job identifier
+            job_id: Unique job identifier (unused, for compatibility)
             content: Content to print
             job_type: Type of content (text, image, etc.)
             from_name: Sender (IP or friendship token name)
@@ -151,6 +141,7 @@ Date: {readable_date}
             True if print succeeded, False otherwise
         """
         self.job_count += 1
+        self.logger.info(f"Printing: {job_type} from {from_name}")
 
         # Format message with headers if metadata is provided
         if from_name and date_str:
@@ -173,17 +164,18 @@ Date: {readable_date}
                 # Simulate printing without device
                 await asyncio.sleep(0.5)
         except Exception as e:
-            self.log(f"Failed to print job {job_id}: {e}", level="ERROR")
             self.failure_count += 1
+            self.logger.error(f"Print failed (({self.success_count} / {self.failure_count})): {e}")
             return False
 
         self.success_count += 1
+        self.logger.info(f"Success! ({self.success_count} / {self.failure_count})")
         return True
 
     async def run(self):
         """Main client loop - connect and process jobs."""
-        self.log(f"Printer Client Starting")
-        self.log(f"Server: {self.get_server_address()}")
+        self.logger.info("Printer Client Starting")
+        self.logger.info(f"Server: {self.server_url}")
 
         uri = f"{self.server_url}?token={self.auth_token}"
 
@@ -191,27 +183,28 @@ Date: {readable_date}
         while True:
             try:
                 connection_attempts += 1
-                self.log(f"Connecting to server (attempt {connection_attempts})...")
+                self.logger.info(f"Connecting to server (attempt {connection_attempts})...")
 
                 async with websockets.connect(uri) as websocket:
                     connection_attempts = 0
-                    self.log(f"Connected to server successfully", level="SUCCESS")
+                    self.logger.info("Connected to server successfully")
 
                     # Process messages indefinitely
                     while True:
                         try:
                             # Receive job from server
                             message = await websocket.recv()
+                            self.logger.info("Message received")
+
                             job_data = json.loads(message)
 
-                            job_id = job_data.get("id")
                             content = job_data.get("content", "")
                             job_type = job_data.get("type", "text")
-                            from_name = job_data.get("from")
+                            from_name = job_data.get("from", "unknown")
                             date_str = job_data.get("date")
 
                             # Print the job
-                            success = await self.print_job(job_id, content, job_type, from_name, date_str)
+                            success = await self.print_job(None, content, job_type, from_name, date_str)
 
                             # Send acknowledgment
                             if success:
@@ -222,23 +215,23 @@ Date: {readable_date}
                             await websocket.send(json.dumps(ack))
 
                         except json.JSONDecodeError as e:
-                            self.log(f"Failed to parse message: {e}", level="ERROR")
+                            self.logger.error(f"Failed to parse message: {e}")
                             # Send failure acknowledgment
                             await websocket.send(json.dumps({"status": "failed", "error_message": str(e)}))
 
             except websockets.exceptions.ConnectionClosed:
-                self.log(f"Connection closed by server", level="WARN")
-                self.log(f"Reconnecting in 5 seconds...")
+                self.logger.warning("Connection closed by server")
+                self.logger.info("Reconnecting in 5 seconds...")
                 await asyncio.sleep(5)
 
             except websockets.exceptions.InvalidStatusCode as e:
-                self.log(f"Authentication failed (invalid token?): {e}", level="ERROR")
-                self.log(f"Exiting...")
+                self.logger.error(f"Authentication failed (invalid token?): {e}")
+                self.logger.info("Exiting...")
                 break
 
             except Exception as e:
-                self.log(f"Connection error: {e}", level="ERROR")
-                self.log(f"Retrying in 5 seconds...")
+                self.logger.error(f"Connection error: {e}")
+                self.logger.info("Retrying in 5 seconds...")
                 await asyncio.sleep(5)
 
     def cleanup(self):
@@ -246,17 +239,17 @@ Date: {readable_date}
         if self.printer:
             try:
                 self.printer.close()
-                self.log("Printer connection closed", level="INFO")
+                self.logger.info("Printer connection closed")
             except Exception as e:
-                self.log(f"Error closing printer: {e}", level="WARN")
+                self.logger.warning(f"Error closing printer: {e}")
 
     async def run_with_signal_handler(self):
         """Run the client with graceful shutdown on Ctrl+C."""
         try:
             await self.run()
         except KeyboardInterrupt:
-            self.log("", level="WARN")
-            self.log("Shutting down...", level="WARN")
+            self.logger.warning("")
+            self.logger.warning("Shutting down...")
             self.cleanup()
             sys.exit(0)
 
