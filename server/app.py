@@ -515,8 +515,3 @@ async def websocket_printer_endpoint(websocket: WebSocket):
     except Exception as e:
         printer_connected = False
         logger.error(f"WebSocket error: {e}", exc_info=True)
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)

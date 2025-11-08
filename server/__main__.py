@@ -2,6 +2,10 @@
 
 import uvicorn
 from .app import app
+from .config import Config
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    config = Config()
+    host = config.get_server_host()
+    port = config.get_server_port()
+    uvicorn.run(app, host=host, port=port)

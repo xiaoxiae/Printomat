@@ -36,6 +36,9 @@ class Config:
         return final.strip('_')
 
     def __init__(self, config_path: str = "config.toml"):
+        # Resolve config path relative to this server package directory
+        if not Path(config_path).is_absolute():
+            config_path = Path(__file__).parent / config_path
         self.config_path = Path(config_path)
         self._config: Dict[str, Any] = {}
         self.load()
@@ -110,6 +113,14 @@ class Config:
     def get_rate_limit_cooldown_hours(self) -> int:
         """Get rate limit cooldown in hours."""
         return self._config.get("rate_limit", {}).get("user_cooldown_hours", 1)
+
+    def get_server_host(self) -> str:
+        """Get server host/IP address."""
+        return self._config.get("server", {}).get("host", "0.0.0.0")
+
+    def get_server_port(self) -> int:
+        """Get server port."""
+        return self._config.get("server", {}).get("port", 8000)
 
     # Token management methods
     def add_friendship_token(self, name: str, message: str, token: str) -> str:

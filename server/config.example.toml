@@ -1,3 +1,7 @@
+[server]
+host = "127.0.0.1"
+port = 9900
+
 [database]
 path = "receipt_printer.db"
 
