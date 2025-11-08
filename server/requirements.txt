@@ -1,11 +1,7 @@
 fastapi
 jinja2
-pillow
 pydantic
-python-escpos
 python-multipart
-pyusb
-requests
 sqlalchemy
 tabulate
 tomli

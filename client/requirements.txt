@@ -1,0 +1,6 @@
+pillow
+python-escpos
+pyusb
+tomli
+tomli_w
+websockets
