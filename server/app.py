@@ -454,6 +454,9 @@ async def websocket_printer_endpoint(websocket: WebSocket):
                         is_priority = next_message.is_priority
                         logger.info(f"Sent message {next_message.id} to printer client (priority={is_priority}, from={from_name})")
                         last_send_time = current_time
+                    except (WebSocketDisconnect, RuntimeError) as e:
+                        # WebSocket is closed or in an invalid state - re-raise to disconnect handler
+                        raise
                     except Exception as e:
                         logger.error(f"Failed to send message {next_message.id} to printer: {e}", exc_info=True)
                         next_message.status = "failed"
@@ -506,6 +509,9 @@ async def websocket_printer_endpoint(websocket: WebSocket):
 
             except asyncio.TimeoutError:
                 pass
+            except (WebSocketDisconnect, RuntimeError) as e:
+                # WebSocket is closed - re-raise to disconnect handler
+                raise
             except Exception as e:
                 logger.error(f"Unexpected error while waiting for acknowledgment: {e}", exc_info=True)
 
