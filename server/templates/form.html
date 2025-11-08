@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Receipt Printer - Submit Print Job</title>
     <script src="https://unpkg.com/htmx.org"></script>
+    <script>
+    function handleImageSelect(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function() {
+            document.getElementById('image').value = reader.result.split(',')[1];
+        };
+        reader.readAsDataURL(file);
+    }
+    </script>
 </head>
 <body>
     <form id="printForm" hx-post="/submit" hx-target="#printForm" hx-swap="outerHTML">
@@ -14,6 +25,12 @@
             <div>
                 <label for="message">Message (optional):</label>
                 <textarea id="message" name="message" placeholder="Enter the text message you want to print..."></textarea>
+            </div>
+
+            <div>
+                <label for="imageFile">Image (optional):</label>
+                <input type="file" id="imageFile" accept="image/png" onchange="handleImageSelect(event)">
+                <input type="hidden" id="image" name="image">
             </div>
 
             <div>
