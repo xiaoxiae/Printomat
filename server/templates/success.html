@@ -1,14 +1,14 @@
 <div id="printForm" class="success">
-    {% if printer_connected %}
-        {% if estimated_wait_minutes == 0 %}
-            <p>Thanks for the message, printing now!</p>
-        {% else %}
-            <p>Thanks for the message, will print in {{ estimated_wait_minutes }} minutes!</p>
-        {% endif %}
+    {% if printer_connected %} {% if estimated_wait_minutes == 0 %}
+    <p>Thanks for the message, printing now!</p>
     {% else %}
-        <p>Printer is asleep queueing (#{{ position }}).</p>
-    {% endif %}
-    {% if is_priority %}
-        <em>{{ message }}</em>
+    <p>
+        Thanks for the message, will print in {{ estimated_wait_minutes }}
+        minutes!
+    </p>
+    {% endif %} {% else %}
+    <p>Printer is asleep, queueing.</p>
+    {% endif %} {% if is_priority %}
+    <em>{{ message }}</em>
     {% endif %}
 </div>
