@@ -3,6 +3,7 @@ import tomli_w
 import unicodedata
 import re
 import secrets
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -80,9 +81,26 @@ class Config:
             self._save()
 
     def get_database_url(self) -> str:
-        """Build SQLite connection URL from config."""
-        db_config = self._config.get("database", {})
-        db_path = db_config.get("path", "receipt_printer.db")
+        """Build SQLite connection URL from config.
+
+        Priority order:
+        1. PRINTOMAT_DB_PATH environment variable
+        2. database.path from config.toml
+        3. Default: receipt_printer.db
+
+        If path is not absolute, it's resolved relative to the server directory.
+        """
+        # Check environment variable first (for Docker)
+        db_path = os.getenv("PRINTOMAT_DB_PATH")
+
+        if not db_path:
+            # Fall back to config file
+            db_config = self._config.get("database", {})
+            db_path = db_config.get("path", "receipt_printer.db")
+
+        # Resolve relative paths to server directory
+        if not Path(db_path).is_absolute():
+            db_path = str(Path(__file__).parent / db_path)
 
         return f"sqlite:///{db_path}"
 

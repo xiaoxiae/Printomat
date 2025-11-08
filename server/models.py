@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, create_
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
+from pathlib import Path
 
 Base = declarative_base()
 
@@ -24,7 +25,16 @@ class PrintRequest(Base):
 
 
 def get_database_engine(db_url: str, connect_args=None):
-    """Create and return a database engine."""
+    """Create and return a database engine.
+
+    For SQLite databases, ensures the parent directory exists.
+    """
+    # For SQLite databases, create parent directory if needed
+    if db_url.startswith("sqlite:///"):
+        db_path = db_url.replace("sqlite:///", "")
+        db_file = Path(db_path)
+        db_file.parent.mkdir(parents=True, exist_ok=True)
+
     if connect_args:
         return create_engine(db_url, connect_args=connect_args)
     return create_engine(db_url)
