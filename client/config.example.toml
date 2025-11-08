@@ -16,3 +16,11 @@ out_ep = "0x04"
 # Printer's printing area width in millimeters
 width_mm = 48
 dpi = 203
+
+# Maximum image width in pixels (printer hardware limit)
+# If not specified, calculated from width_mm * dpi / 25.4
+max_width_pixels = 384
+
+# Font path for text rendering (optional)
+# If not specified, uses default PIL font
+# font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"

@@ -78,3 +78,11 @@ class Config:
         if isinstance(ep, str):
             return int(ep, 0)
         return ep
+
+    def get_printer_max_width_pixels(self) -> Optional[int]:
+        """Get the maximum image width in pixels the printer can handle."""
+        return self._config.get("printer", {}).get("max_width_pixels")
+
+    def get_font_path(self) -> Optional[str]:
+        """Get the path to the font file for text rendering."""
+        return self._config.get("printer", {}).get("font_path")
