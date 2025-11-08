@@ -25,12 +25,36 @@ from .config import Config
 from PIL import Image, ImageDraw, ImageFont
 from escpos.printer import Usb
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
+
+def setup_logger(name: str = __name__) -> logging.Logger:
+    """Create a dedicated logger with explicit console handler.
+
+    This ensures the logger won't be hijacked by other modules.
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+
+    # Remove any existing handlers to prevent duplicates
+    logger.handlers.clear()
+
+    # Create console handler with explicit stream
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+
+    # Create formatter
+    formatter = logging.Formatter(
+        fmt="[%(asctime)s] %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    console_handler.setFormatter(formatter)
+
+    # Add handler to logger
+    logger.addHandler(console_handler)
+
+    # Prevent propagation to root logger (avoid duplicate output)
+    logger.propagate = False
+
+    return logger
 
 
 class PrinterClient:
@@ -80,7 +104,8 @@ class PrinterClient:
         else:
             self.target_width_pixels = calculated_width
 
-        self.logger = logging.getLogger(__name__)
+        # Create dedicated logger with explicit handler
+        self.logger = setup_logger("PrinterClient")
 
         # Initialize debug print directory (relative to client module location)
         self.debug_print_dir = Path(__file__).parent / "print"

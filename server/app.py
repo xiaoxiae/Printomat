@@ -16,15 +16,39 @@ import sys
 import logging
 from .console import run_console
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ]
-)
-logger = logging.getLogger(__name__)
+
+def setup_logger(name: str = __name__) -> logging.Logger:
+    """Create a dedicated logger with explicit console handler.
+
+    This ensures the logger won't be hijacked by other modules.
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+
+    # Remove any existing handlers to prevent duplicates
+    logger.handlers.clear()
+
+    # Create console handler with explicit stream
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+
+    # Create formatter
+    formatter = logging.Formatter(
+        fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    console_handler.setFormatter(formatter)
+
+    # Add handler to logger
+    logger.addHandler(console_handler)
+
+    # Prevent propagation to root logger (avoid duplicate output)
+    logger.propagate = False
+
+    return logger
+
+
+# Create dedicated logger
+logger = setup_logger("PrintomatServer")
 
 # Load configuration (look for config.toml in the server directory)
 config_path = Path(__file__).parent / "config.toml"
