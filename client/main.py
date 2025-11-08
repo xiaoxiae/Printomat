@@ -8,17 +8,22 @@ This is a standalone client that:
 4. Sends acknowledgments back to the server
 """
 
+import argparse
 import asyncio
-import websockets
-import json
-import sys
-import logging
-from datetime import datetime
-from typing import Optional
-import time
 import base64
+import io
+import json
+import logging
+import sys
+import time
+import websockets
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
+
 from .config import Config
+from PIL import Image
+from escpos.printer import Usb
 
 # Configure logging
 logging.basicConfig(
@@ -27,18 +32,18 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
-try:
-    from escpos.printer import Usb
-    HAS_ESCPOS = True
-except ImportError:
-    HAS_ESCPOS = False
+# Image aspect ratio constraints
+MAX_ASPECT_RATIO = 9 / 16  # width / height, prevents infinitely wide strips
 
 
 class PrinterClient:
     """WebSocket client for receiving and processing print jobs."""
 
     def __init__(self, server_url: str, auth_token: str,
-                 printer_vendor_id: Optional[int] = None, printer_product_id: Optional[int] = None):
+                 printer_vendor_id: Optional[int] = None, printer_product_id: Optional[int] = None,
+                 printer_width_mm: float = 58, printer_dpi: int = 203,
+                 printer_profile: Optional[str] = None,
+                 printer_in_ep: Optional[int] = None, printer_out_ep: Optional[int] = None):
         """Initialize the printer client.
 
         Args:
@@ -46,6 +51,11 @@ class PrinterClient:
             auth_token: Authentication token for the printer
             printer_vendor_id: USB vendor ID for ESC/POS printer (e.g., 0x0471)
             printer_product_id: USB product ID for ESC/POS printer (e.g., 0x0055)
+            printer_width_mm: Printer's printing area width in millimeters
+            printer_dpi: Printer's DPI (dots per inch)
+            printer_profile: ESC/POS printer profile (e.g., 'TM-T88III')
+            printer_in_ep: USB IN endpoint address (e.g., 0x82)
+            printer_out_ep: USB OUT endpoint address (e.g., 0x04)
         """
         self.server_url = server_url
         self.auth_token = auth_token
@@ -55,6 +65,11 @@ class PrinterClient:
         self.printer = None
         self.printer_vendor_id = printer_vendor_id
         self.printer_product_id = printer_product_id
+        self.printer_width_mm = printer_width_mm
+        self.printer_dpi = printer_dpi
+        self.printer_profile = printer_profile
+        self.printer_in_ep = printer_in_ep
+        self.printer_out_ep = printer_out_ep
         self.logger = logging.getLogger(__name__)
 
         # Initialize debug print directory (relative to client module location)
@@ -62,8 +77,83 @@ class PrinterClient:
         self.debug_print_dir.mkdir(exist_ok=True)
 
         # Initialize ESC/POS printer if credentials provided
-        if self.printer_vendor_id and self.printer_product_id:
-            self._initialize_printer()
+        self._initialize_printer()
+
+    def _validate_and_process_image(self, base64_content: str) -> Optional[bytes]:
+        """Validate and process an image from base64-encoded content.
+
+        This method:
+        1. Validates that the content is a valid image
+        2. Crops if aspect ratio is too wide (max 9:16)
+        3. Resizes to match printer width and DPI
+        4. Returns the resized image bytes, or None if validation fails
+
+        Args:
+            base64_content: Base64-encoded image bytes
+
+        Returns:
+            Resized image bytes if valid, None otherwise
+        """
+        try:
+            # Decode base64 to binary
+            image_bytes = base64.b64decode(base64_content)
+
+            # Open and validate image
+            image = Image.open(io.BytesIO(image_bytes))
+            image.load()  # Force validation
+
+            # Get original dimensions
+            orig_width, orig_height = image.size
+            self.logger.info(f"Image loaded: {orig_width}x{orig_height} pixels")
+
+            # Crop image if aspect ratio is too wide
+            aspect_ratio = orig_width / orig_height
+            if aspect_ratio > MAX_ASPECT_RATIO:
+                # Image is too wide, crop to match max aspect ratio
+                # Target: width / height = MAX_ASPECT_RATIO
+                # So: target_width = height * MAX_ASPECT_RATIO
+                target_crop_width = int(orig_height * MAX_ASPECT_RATIO)
+                left = (orig_width - target_crop_width) // 2
+                right = left + target_crop_width
+                image = image.crop((left, 0, right, orig_height))
+                orig_width = target_crop_width
+                self.logger.info(
+                    f"Image too wide (aspect ratio {aspect_ratio:.2f}), cropped to {target_crop_width}x{orig_height} pixels"
+                )
+
+            # Resize to printer width
+            # Convert printer width from mm to pixels: width_mm * (dpi / 25.4)
+            # (25.4 mm per inch)
+            target_width_pixels = int(self.printer_width_mm * self.printer_dpi / 25.4)
+
+            # Calculate target height maintaining aspect ratio
+            target_height_pixels = int(target_width_pixels * orig_height / orig_width)
+
+            self.logger.info(
+                f"Resizing image to {target_width_pixels}x{target_height_pixels} pixels "
+                f"({self.printer_width_mm}mm width at {self.printer_dpi} DPI)"
+            )
+
+            # Resize image using high-quality resampling
+            resized = image.resize(
+                (target_width_pixels, target_height_pixels),
+                Image.Resampling.LANCZOS
+            )
+
+            # Convert to bytes for saving
+            output = io.BytesIO()
+            resized.save(output, format='PNG')
+            return output.getvalue()
+
+        except base64.binascii.Error as e:
+            self.logger.error(f"Invalid base64 encoding: {e}")
+            return None
+        except (OSError, ValueError) as e:
+            self.logger.error(f"Failed to load image: {e}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Unexpected error processing image: {e}")
+            return None
 
     def _save_debug_print(self, content: str) -> None:
         """Save debug print to file with datetime name.
@@ -102,13 +192,23 @@ class PrinterClient:
         Returns:
             True if printer initialized successfully, False otherwise
         """
-        if not HAS_ESCPOS:
-            self.logger.error("python-escpos not installed. Run: pip install python-escpos pyusb")
+        if not self.printer_profile or not self.printer_vendor_id or not self.printer_product_id:
+            self.logger.warning("Printer profile not configured. Skipping initialization.")
             return False
 
         try:
-            self.printer = Usb(self.printer_vendor_id, self.printer_product_id)
-            self.logger.info(f"Printer initialized (vendor: 0x{self.printer_vendor_id:04x}, product: 0x{self.printer_product_id:04x})")
+            self.printer = Usb(
+                self.printer_vendor_id,
+                self.printer_product_id,
+                in_ep=self.printer_in_ep,
+                out_ep=self.printer_out_ep,
+                profile=self.printer_profile
+            )
+            self.logger.info(
+                f"Printer initialized (vendor: 0x{self.printer_vendor_id:04x}, "
+                f"product: 0x{self.printer_product_id:04x}, profile: {self.printer_profile}, "
+                f"in_ep: 0x{self.printer_in_ep:02x}, out_ep: 0x{self.printer_out_ep:02x})"
+            )
             return True
         except Exception as e:
             self.logger.error(f"Failed to initialize printer: {e}")
@@ -228,11 +328,16 @@ Date: {readable_date}
             base64_content: Base64-encoded image bytes
             from_name: Sender (IP or friendship token name)
             date_str: ISO format datetime string
-        """
-        # Decode base64 content to binary
-        image_bytes = base64.b64decode(base64_content)
 
-        # Save debug image to file
+        Raises:
+            ValueError: If image validation fails
+        """
+        # Validate and process the image
+        image_bytes = self._validate_and_process_image(base64_content)
+        if image_bytes is None:
+            raise ValueError("Image validation or processing failed")
+
+        # Save debug image to file (resized version)
         image_path = self._save_debug_image(image_bytes)
         if image_path:
             self.logger.info(f"Image saved to {image_path}")
@@ -329,6 +434,36 @@ Date: {readable_date}
             except Exception as e:
                 self.logger.warning(f"Error closing printer: {e}")
 
+    def test_print(self):
+        """Print a test message to verify printer is working."""
+        if not self.printer:
+            self.logger.error("Printer not initialized. Check USB vendor and product IDs in config.")
+            return False
+
+        try:
+            self.logger.info("Printing test message...")
+            separator = "=" * 40
+            test_message = f"""{separator}
+PRINTER TEST
+{separator}
+
+Printomat Printer Client
+
+Test: OK
+Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+{separator}
+"""
+            self.printer.text(test_message)
+            self.printer.cut()
+            self.logger.info("Test print completed successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"Test print failed: {e}")
+            return False
+        finally:
+            self.cleanup()
+
     async def run_with_signal_handler(self):
         """Run the client with graceful shutdown on Ctrl+C."""
         try:
@@ -342,23 +477,43 @@ Date: {readable_date}
 
 def main():
     """Initialize and run the printer client."""
+    parser = argparse.ArgumentParser(
+        description="Printomat Printer Client - connects to server and prints jobs"
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Run a test print and exit (verifies printer is working)"
+    )
+    args = parser.parse_args()
+
     # Load configuration (look for config.toml in the client directory)
     config_path = Path(__file__).parent / "config.toml"
     config = Config(str(config_path))
 
-    # Create and run client
+    # Create client
     client = PrinterClient(
         server_url=config.get_server_url(),
         auth_token=config.get_auth_token(),
         printer_vendor_id=config.get_printer_vendor_id(),
-        printer_product_id=config.get_printer_product_id()
+        printer_product_id=config.get_printer_product_id(),
+        printer_width_mm=config.get_printer_width_mm(),
+        printer_dpi=config.get_printer_dpi(),
+        printer_profile=config.get_printer_profile(),
+        printer_in_ep=config.get_printer_in_ep(),
+        printer_out_ep=config.get_printer_out_ep()
     )
 
-    # Run with signal handler for graceful shutdown
-    try:
-        asyncio.run(client.run_with_signal_handler())
-    except KeyboardInterrupt:
-        pass
+    # Run in test mode or normal mode
+    if args.test:
+        success = client.test_print()
+        sys.exit(0 if success else 1)
+    else:
+        # Run with signal handler for graceful shutdown
+        try:
+            asyncio.run(client.run_with_signal_handler())
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":

@@ -3,12 +3,16 @@ url = "ws://localhost:9900/ws"
 auth_token = "secret-printer-token-here"
 
 [printer]
-# USB vendor ID (hexadecimal or decimal)
-# Examples: vendor_id = "0x0471" or vendor_id = 1137
-# Leave commented out to run in simulation mode (no printer required)
-# vendor_id = "0x0471"
+# USB vendor ID
+vendor_id = "0x0483"
+product_id = "0x5840"
 
-# USB product ID (hexadecimal or decimal)
-# Examples: product_id = "0x0055" or product_id = 85
-# Leave commented out to run in simulation mode
-# product_id = "0x0055"
+# ESC/POS printer profile
+profile = 'TM-T88III'
+
+in_ep = "0x82"
+out_ep = "0x04"
+
+# Printer's printing area width in millimeters
+width_mm = 48
+dpi = 203

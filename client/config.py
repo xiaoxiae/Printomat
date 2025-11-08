@@ -46,3 +46,35 @@ class Config:
         if isinstance(product, str):
             return int(product, 0)
         return product
+
+    def get_printer_width_mm(self) -> float:
+        """Get the printer's printing area width in millimeters."""
+        return self._config.get("printer", {}).get("width_mm", 58)
+
+    def get_printer_dpi(self) -> int:
+        """Get the printer's DPI (dots per inch)."""
+        return self._config.get("printer", {}).get("dpi", 203)
+
+    def get_printer_profile(self) -> Optional[str]:
+        """Get the printer profile for ESC/POS (e.g., 'TM-T88III')."""
+        return self._config.get("printer", {}).get("profile")
+
+    def get_printer_in_ep(self) -> Optional[int]:
+        """Get the USB IN endpoint address for the printer (e.g., 0x82)."""
+        ep = self._config.get("printer", {}).get("in_ep")
+        if ep is None:
+            return None
+        # Support both hex and decimal strings
+        if isinstance(ep, str):
+            return int(ep, 0)
+        return ep
+
+    def get_printer_out_ep(self) -> Optional[int]:
+        """Get the USB OUT endpoint address for the printer (e.g., 0x04)."""
+        ep = self._config.get("printer", {}).get("out_ep")
+        if ep is None:
+            return None
+        # Support both hex and decimal strings
+        if isinstance(ep, str):
+            return int(ep, 0)
+        return ep
