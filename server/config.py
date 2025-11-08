@@ -132,6 +132,10 @@ class Config:
         """Get rate limit cooldown in hours."""
         return self._config.get("rate_limit", {}).get("user_cooldown_hours", 1)
 
+    def get_cors_allow_origins(self) -> list:
+        """Get list of allowed origins for CORS."""
+        return self._config.get("cors", {}).get("allow_origins", [])
+
     def get_server_host(self) -> str:
         """Get server host/IP address."""
         return self._config.get("server", {}).get("host", "0.0.0.0")

@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, status, Fo
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pathlib import Path
 from .config import Config
@@ -67,6 +68,17 @@ Base.metadata.create_all(bind=engine)
 
 # Initialize FastAPI app
 app = FastAPI(title="Receipt Printer Server")
+
+# Setup CORS middleware
+cors_origins = config.get_cors_allow_origins()
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
 
 # Setup Jinja2 templates
 templates_dir = Path(__file__).parent / "templates"

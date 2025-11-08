@@ -25,3 +25,8 @@ send_interval_seconds = 60
 
 [rate_limit]
 user_cooldown_hours = 1
+
+[cors]
+# List of allowed origins for CORS. Required for HTMX and fetch requests from other domains.
+# Leave empty to disable CORS.
+allow_origins = ["https://example.com"]
