@@ -218,16 +218,31 @@ class PrinterClient:
                 test_line = ' '.join(current_line + [word])
                 bbox = temp_draw.textbbox((0, 0), test_line, font=font)
                 line_width = bbox[2] - bbox[0]
+                max_width = target_width_pixels - 20  # 10px padding on each side
 
-                if line_width <= target_width_pixels - 20:  # 10px padding on each side
+                if line_width <= max_width:
                     current_line.append(word)
                 else:
                     if current_line:
                         lines.append(' '.join(current_line))
-                        current_line = [word]
-                    else:
-                        # Word is too long, add it anyway
-                        lines.append(word)
+                        current_line = []
+
+                    # Handle word that's too long by breaking it character by character
+                    current_chunk = ''
+                    for char in word:
+                        test_chunk = current_chunk + char
+                        bbox = temp_draw.textbbox((0, 0), test_chunk, font=font)
+                        chunk_width = bbox[2] - bbox[0]
+
+                        if chunk_width <= max_width:
+                            current_chunk = test_chunk
+                        else:
+                            if current_chunk:
+                                lines.append(current_chunk)
+                            current_chunk = char
+
+                    if current_chunk:
+                        current_line = [current_chunk]
 
             if current_line:
                 lines.append(' '.join(current_line))
