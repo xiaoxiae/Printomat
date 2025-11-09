@@ -136,6 +136,14 @@ class Config:
         """Get list of allowed origins for CORS."""
         return self._config.get("cors", {}).get("allow_origins", [])
 
+    def get_message_max_length(self) -> int:
+        """Get maximum message length in characters."""
+        return self._config.get("limits", {}).get("message_max_length", 500)
+
+    def get_image_max_size(self) -> int:
+        """Get maximum image size in bytes (base64-encoded)."""
+        return self._config.get("limits", {}).get("image_max_size", 1000000)
+
     def get_server_host(self) -> str:
         """Get server host/IP address."""
         return self._config.get("server", {}).get("host", "0.0.0.0")
@@ -153,6 +161,11 @@ class Config:
         """
         if "friendship_tokens" not in self._config:
             self._config["friendship_tokens"] = []
+
+        # Validate message length
+        max_message_length = self.get_message_max_length()
+        if len(message) > max_message_length:
+            raise ValueError(f"Message exceeds maximum length of {max_message_length} characters (got {len(message)})")
 
         label = self.generate_label_from_name(name)
 

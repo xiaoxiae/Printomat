@@ -10,6 +10,10 @@
     <p>Invalid request, stop trying to hack my server you scallywag.</p>
     {% elif error == "queue_full" %}
     <p>The queue is currently full. This should not be possible.</p>
+    {% elif error == "message_too_long" %}
+    <p>Your message is too long. Please keep it under {{ message_max_length }} characters.</p>
+    {% elif error == "image_too_large" %}
+    <p>Your image is too large. Please keep it under {{ "%.1f"|format(image_max_size / 1048576) }} MB.</p>
     {% elif error == "database_error" %}
     <p>
         A database error occurred, please

@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pathlib import Path
 from .config import Config
 from .models import Base, get_database_engine, get_session_local, PrintRequest
@@ -97,8 +97,8 @@ console_thread = None
 
 # Pydantic models
 class SubmitRequest(BaseModel):
-    message: Optional[str] = None  # Text message (optional)
-    image: Optional[str] = None    # Base64-encoded image (optional)
+    message: Optional[str] = Field(None, max_length=config.get_message_max_length())
+    image: Optional[str] = Field(None, max_length=config.get_image_max_size())
     token: Optional[str] = None
 
 
@@ -268,6 +268,30 @@ async def _process_submit_request(message: Optional[str], image: Optional[str], 
                     return response, 503, True
                 return JSONResponse(status_code=503, content=response)
 
+        # Validate message and image size limits
+        max_message_length = config.get_message_max_length()
+        max_image_size = config.get_image_max_size()
+
+        if message and len(message) > max_message_length:
+            logger.warning(f"Message from {client_ip} exceeds max length ({len(message)} > {max_message_length})")
+            response = {
+                "error": "message_too_long",
+                "message": f"Message exceeds maximum length of {max_message_length} characters"
+            }
+            if is_form_submission:
+                return response, 413, True
+            return JSONResponse(status_code=413, content=response)
+
+        if image and len(image) > max_image_size:
+            logger.warning(f"Image from {client_ip} exceeds max size ({len(image)} > {max_image_size})")
+            response = {
+                "error": "image_too_large",
+                "message": f"Image exceeds maximum size of {max_image_size} bytes"
+            }
+            if is_form_submission:
+                return response, 413, True
+            return JSONResponse(status_code=413, content=response)
+
         # Determine content type
         if message and image:
             content_type = "mixed"
@@ -382,7 +406,9 @@ async def submit_print_request(request: Request):
                     {
                         "request": request,
                         "error": error,
-                        "minutes_until_retry": minutes_until_retry
+                        "minutes_until_retry": minutes_until_retry,
+                        "message_max_length": config.get_message_max_length(),
+                        "image_max_size": config.get_image_max_size()
                     }
                 )
             else:
