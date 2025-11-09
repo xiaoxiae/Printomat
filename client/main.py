@@ -327,35 +327,21 @@ class PrinterClient:
             self.printer = None
             return False
 
-    async def print_job(self, job_id: Optional[int], message_content: Optional[str],
-                       image_content: Optional[str],
-                       from_name: Optional[str] = None, date_str: Optional[str] = None) -> bool:
-        """Print a job to the ESC/POS printer (or simulate if not available).
-
-        Creates a single image containing header, optional message, optional user image,
-        and footer, then prints it.
+    async def _attempt_print_job(self, message_content: Optional[str],
+                                 image_content: Optional[str],
+                                 from_name: Optional[str] = None,
+                                 date_str: Optional[str] = None) -> Optional[str]:
+        """Attempt to print a single job without retry logic.
 
         Args:
-            job_id: Unique job identifier (unused, for compatibility)
             message_content: Optional text message to print
             image_content: Optional base64-encoded image to print
             from_name: Sender (IP or friendship token name)
             date_str: ISO format datetime string
 
         Returns:
-            True if print succeeded, False otherwise
+            None if successful, error message string if failed
         """
-        self.job_count += 1
-
-        # Log what we're printing
-        content_types = []
-        if message_content:
-            content_types.append("message")
-        if image_content:
-            content_types.append("image")
-        content_desc = " + ".join(content_types) if content_types else "unknown"
-        self.logger.info(f"Printing: {content_desc} from {from_name}")
-
         try:
             images_to_concat = []
 
@@ -424,14 +410,67 @@ class PrinterClient:
                 # Simulate printing without device
                 await asyncio.sleep(0.5)
 
-        except Exception as e:
-            self.failure_count += 1
-            self.logger.error(f"Print failed ({self.success_count} / {self.failure_count}): {e}")
-            return False
+            return None  # Success
 
-        self.success_count += 1
-        self.logger.info(f"Success! ({self.success_count} / {self.failure_count})")
-        return True
+        except Exception as e:
+            return str(e)  # Return error message
+
+    async def print_job(self, job_id: Optional[int], message_content: Optional[str],
+                       image_content: Optional[str],
+                       from_name: Optional[str] = None, date_str: Optional[str] = None) -> bool:
+        """Print a job to the ESC/POS printer with retry logic.
+
+        Creates a single image containing header, optional message, optional user image,
+        and footer, then prints it. On failure, attempts to reconnect the printer and
+        retry up to 2 times before giving up.
+
+        Args:
+            job_id: Unique job identifier (unused, for compatibility)
+            message_content: Optional text message to print
+            image_content: Optional base64-encoded image to print
+            from_name: Sender (IP or friendship token name)
+            date_str: ISO format datetime string
+
+        Returns:
+            True if print succeeded, False otherwise
+        """
+        self.job_count += 1
+
+        # Log what we're printing
+        content_types = []
+        if message_content:
+            content_types.append("message")
+        if image_content:
+            content_types.append("image")
+        content_desc = " + ".join(content_types) if content_types else "unknown"
+        self.logger.info(f"Printing: {content_desc} from {from_name}")
+
+        max_retries = 2
+        for attempt in range(max_retries + 1):  # 0-indexed, so +1 for 2 retries
+            error_message = await self._attempt_print_job(message_content, image_content, from_name, date_str)
+
+            if error_message is None:
+                # Success
+                self.success_count += 1
+                self.logger.info(f"Success! ({self.success_count} / {self.failure_count})")
+                return True
+
+            # Failed attempt
+            self.logger.error(f"Print attempt {attempt + 1} failed: {error_message}")
+
+            if attempt < max_retries:
+                # Not the last attempt, try to reconnect
+                self.logger.info(f"Waiting before retry attempt {attempt + 2}...")
+                await asyncio.sleep(2)  # Wait 2 seconds before retrying
+
+                self.logger.info("Attempting to reinitialize printer...")
+                self._initialize_printer()
+
+        # All retries exhausted
+        self.failure_count += 1
+        self.logger.error(f"Print failed after {max_retries + 1} attempts ({self.success_count} / {self.failure_count})")
+        self.logger.error("Terminating client due to persistent printer failures")
+        sys.exit(1)
 
     async def run(self):
         """Main client loop - connect and process jobs."""
