@@ -500,7 +500,9 @@ class PrinterClient:
                 connection_attempts += 1
                 self.logger.info(f"Connecting to server (attempt {connection_attempts})...")
 
-                async with websockets.connect(uri) as websocket:
+                # Increase max message size to handle large base64-encoded images
+                # Default is 2^20 (1MB), we need to handle potentially larger images
+                async with websockets.connect(uri, max_size=10_000_000) as websocket:
                     connection_attempts = 0
                     self.logger.info("Connected to server successfully")
 
@@ -509,7 +511,6 @@ class PrinterClient:
                         try:
                             # Receive job from server
                             message = await websocket.recv()
-                            self.logger.info("Message received")
 
                             job_data = json.loads(message)
 
