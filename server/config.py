@@ -153,11 +153,10 @@ class Config:
         return self._config.get("server", {}).get("port", 8000)
 
     # Token management methods
-    def add_friendship_token(self, name: str, message: str, token: str) -> str:
+    def add_friendship_token(self, name: str, message: str, token: str) -> None:
         """Add a new friendship token to the configuration.
 
-        Generates label automatically from name.
-        Returns the generated label.
+        Labels are generated dynamically from the name and not stored.
         """
         if "friendship_tokens" not in self._config:
             self._config["friendship_tokens"] = []
@@ -167,34 +166,30 @@ class Config:
         if len(message) > max_message_length:
             raise ValueError(f"Message exceeds maximum length of {max_message_length} characters (got {len(message)})")
 
-        label = self.generate_label_from_name(name)
-
-        # Check if label already exists
+        # Check if a token with this name already exists
         for token_data in self._config["friendship_tokens"]:
-            if token_data.get("label") == label:
-                raise ValueError(f"Token with label '{label}' already exists")
+            if token_data.get("name") == name:
+                raise ValueError(f"Token with name '{name}' already exists")
 
         self._config["friendship_tokens"].append({
             "name": name,
-            "label": label,
             "message": message,
             "token": token
         })
         self._save()
         self.reload()
-        return label
 
-    def remove_friendship_token(self, label: str) -> None:
-        """Remove a friendship token from the configuration."""
+    def remove_friendship_token(self, name: str) -> None:
+        """Remove a friendship token from the configuration by name."""
         if "friendship_tokens" not in self._config:
             return
 
-        # Find and remove token by label
+        # Find and remove token by name
         for idx, token_data in enumerate(self._config["friendship_tokens"]):
-            if token_data.get("label") == label:
+            if token_data.get("name") == name:
                 self._config["friendship_tokens"].pop(idx)
                 self._save()
                 self.reload()
                 return
 
-        raise ValueError(f"Token with label '{label}' not found")
+        raise ValueError(f"Token with name '{name}' not found")

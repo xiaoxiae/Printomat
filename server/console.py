@@ -34,7 +34,7 @@ Type 'quit' to exit.
         """Add a new friendship token.
 
         Interactive: prompts for name and message.
-        Label and token are auto-generated from name.
+        Token is auto-generated.
         """
         print("\n--- Add New Friendship Token ---")
 
@@ -49,16 +49,14 @@ Type 'quit' to exit.
                 print("ERROR: Message cannot be empty")
                 return
 
-            # Auto-generate token and label
+            # Auto-generate token
             token = secrets.token_hex(4)
-            label = self.config.generate_label_from_name(name)
 
             # Add to config via config class
             try:
                 self.config.add_friendship_token(name, message, token)
                 print("Token added successfully!")
                 print(f"   Name: {name}")
-                print(f"   Label (auto-generated): {label}")
                 print(f"   Token: {token}")
             except ValueError as e:
                 print(f"ERROR: {e}")
@@ -70,7 +68,7 @@ Type 'quit' to exit.
         """Edit an existing friendship token.
 
         Usage: edit_token <name>
-        Allows editing message and token. Name change will update the label.
+        Allows editing message and token. Changing name creates a new token.
         """
         if not arg:
             print("ERROR: Please specify a name to edit")
@@ -80,11 +78,9 @@ Type 'quit' to exit.
         tokens = self.config.get_friendship_tokens()
 
         # Find the token data by matching the name field
-        target_label = None
         target_data = None
         for token_data in tokens:
             if token_data.get("name") == search_name:
-                target_label = token_data.get("label")
                 target_data = token_data
                 break
 
@@ -110,24 +106,19 @@ Type 'quit' to exit.
             else:
                 token = secrets.token_hex(4)
 
-            # Generate new label from updated name
-            new_label = self.config.generate_label_from_name(name)
-
-            # If name changed, label will be different
-            if new_label != target_label:
-                # Check if new label already exists
+            # If name changed, check if new name already exists
+            if name != search_name:
                 for existing_token in tokens:
-                    if existing_token.get("label") == new_label and existing_token.get("label") != target_label:
-                        print(f"ERROR: Token with name '{name}' (label: {new_label}) already exists")
+                    if existing_token.get("name") == name:
+                        print(f"ERROR: Token with name '{name}' already exists")
                         return
 
             # Remove old token and add new one
             try:
-                self.config.remove_friendship_token(target_label)
+                self.config.remove_friendship_token(search_name)
                 self.config.add_friendship_token(name, message, token)
                 print("Token updated successfully!")
                 print(f"   Name: {name}")
-                print(f"   Label (auto-generated): {new_label}")
                 print(f"   Token: {token}")
             except ValueError as e:
                 print(f"ERROR: {e}")
@@ -146,12 +137,11 @@ Type 'quit' to exit.
         rows = []
         for token_data in tokens:
             name = token_data.get("name", "N/A")
-            label = token_data.get("label", "N/A")
             token_val = token_data.get("token", "N/A")
             message = token_data.get("message", "")[:40]
-            rows.append([name, label, token_val[:8], message])
+            rows.append([name, token_val[:8], message])
 
-        print("\n" + tabulate(rows, headers=["Name", "Label (auto-generated)", "Token", "Message"], tablefmt="grid"))
+        print("\n" + tabulate(rows, headers=["Name", "Token", "Message"], tablefmt="grid"))
 
     def do_remove_token(self, arg):
         """Remove a friendship token by name.
@@ -166,28 +156,26 @@ Type 'quit' to exit.
         tokens = self.config.get_friendship_tokens()
 
         # Find the token data by matching the name field
-        target_label = None
-        target_name = None
+        target_data = None
         for token_data in tokens:
             if token_data.get("name") == search_name:
-                target_label = token_data.get("label")
-                target_name = token_data.get("name", "N/A")
+                target_data = token_data
                 break
 
-        if not target_label:
+        if not target_data:
             print(f"ERROR: Token not found: {search_name}")
             return
 
         # Confirm deletion
-        confirm = input(f"Remove token '{target_name}' ({target_label})? (y/n): ").strip().lower()
+        confirm = input(f"Remove token '{search_name}'? (y/n): ").strip().lower()
         if confirm != 'y':
             print("Cancelled")
             return
 
         # Remove from config via config class
         try:
-            self.config.remove_friendship_token(target_label)
-            print(f"Token removed: {target_name}")
+            self.config.remove_friendship_token(search_name)
+            print(f"Token removed: {search_name}")
         except ValueError as e:
             print(f"ERROR: {e}")
 

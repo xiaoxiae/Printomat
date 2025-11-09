@@ -319,7 +319,6 @@ async def _process_submit_request(message: Optional[str], image: Optional[str], 
                 image_content=image,
                 submitter_ip=client_ip,
                 is_priority=bool(token_data),
-                friendship_token_label=token_data.get("label") if token_data else None,
                 friendship_token_name=token_data.get("name") if token_data else None,
                 status="queued"  # Always start as queued, will be sent by WebSocket handler
             )

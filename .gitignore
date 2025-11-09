@@ -6,3 +6,4 @@ test_*
 config.toml
 *.db
 client/print
+server/alembic.ini
