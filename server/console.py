@@ -212,8 +212,9 @@ Type 'quit' to exit.
             for idx, req in enumerate(queued, 1):
                 priority = "YES" if req.is_priority else "NO"
                 created = req.created_at.strftime("%Y-%m-%d %H:%M:%S")
-                # Show first 40 chars of content
-                preview = req.content[:40].replace("\n", " ")
+                # Show first 40 chars of message or image indicator
+                content = req.message_content or f"[{req.type.upper()}]"
+                preview = content[:40].replace("\n", " ")
                 rows.append([idx, req.id, req.type, priority, created, preview])
 
             print("\n" + tabulate(rows, headers=["Pos", "ID", "Type", "Priority", "Created", "Preview"], tablefmt="grid"))
@@ -261,7 +262,8 @@ Type 'quit' to exit.
             for req in results:
                 status = req.status
                 created = req.created_at.strftime("%Y-%m-%d %H:%M:%S")
-                preview = req.content[:30].replace("\n", " ")
+                content = req.message_content or f"[{req.type.upper()}]"
+                preview = content[:30].replace("\n", " ")
                 rows.append([req.id, status, req.type, req.submitter_ip, created, preview])
 
             print("\n" + tabulate(rows, headers=["ID", "Status", "Type", "IP", "Created", "Preview"], tablefmt="grid"))
