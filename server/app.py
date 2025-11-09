@@ -14,6 +14,7 @@ import json
 import time
 import threading
 import sys
+import os
 import logging
 from .console import run_console
 
@@ -89,6 +90,9 @@ queue_max_size = config.get_queue_max_size()
 
 # Global printer connection status
 printer_connected = False
+
+# Console thread reference for shutdown
+console_thread = None
 
 
 # Pydantic models
@@ -167,15 +171,16 @@ def get_queue_position(request_id: int, session) -> int:
 @app.on_event("startup")
 async def startup_event():
     """Initialize on server startup."""
+    global console_thread
     logger.info("Server starting up...")
     logger.info(f"Database: {config.get_database_url()}")
 
     try:
-        # Start interactive console in a separate thread
+        # Start interactive console in a separate daemon thread
         console_thread = threading.Thread(
             target=run_console,
             args=(config, SessionLocal),
-            daemon=False
+            daemon=True
         )
         console_thread.start()
         logger.info("Interactive console started. Type 'help' for commands.")

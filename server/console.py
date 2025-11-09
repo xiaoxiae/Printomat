@@ -3,6 +3,7 @@
 
 import cmd
 import secrets
+import os
 from typing import Optional
 from tabulate import tabulate
 from .config import Config
@@ -277,8 +278,9 @@ Type 'quit' to exit.
         os.system('clear' if os.name == 'posix' else 'cls')
 
     def do_quit(self, arg):
-        """Exit the console."""
-        return True
+        """Exit the console and shut down the server."""
+        print("Shutting down server...")
+        os.kill(os.getpid(), 15)  # SIGTERM
 
     def emptyline(self):
         """Handle empty input - do nothing instead of repeating last command."""
@@ -295,4 +297,10 @@ Type 'quit' to exit.
 def run_console(config: Config, session_local):
     """Run the interactive console."""
     console = PrintomatConsole(config, session_local)
-    console.cmdloop()
+    try:
+        console.cmdloop()
+    except KeyboardInterrupt:
+        # Gracefully handle Ctrl+C - just exit the console thread
+        print("\nConsole interrupted. Exiting...")
+    except Exception as e:
+        print(f"Error in console: {e}")
