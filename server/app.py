@@ -122,9 +122,20 @@ class PrinterMessage(BaseModel):
 
 # Helper functions
 def get_client_ip(request: Request) -> str:
-    """Extract client IP address from request."""
+    """
+    Extract client IP address from request.
+
+    In Docker without a reverse proxy, we need to get it from headers.
+    """
+    # Check X-Forwarded-For header (set by reverse proxies)
+    forwarded_ip = request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
+    if forwarded_ip:
+        return forwarded_ip.split(",")[0].strip()
+
+    # Fall back to direct connection IP
     if request.client:
         return request.client.host
+
     return "unknown"
 
 
