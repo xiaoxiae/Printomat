@@ -179,6 +179,82 @@ Type 'quit' to exit.
         except ValueError as e:
             print(f"ERROR: {e}")
 
+    # Print Management Commands
+
+    def do_retry(self, arg):
+        """Retry a failed or printed request.
+
+        Usage: retry <request_id>
+        Creates a new print request with the same content.
+        """
+        if not arg:
+            print("ERROR: Please specify a request ID to retry")
+            return
+
+        try:
+            request_id = int(arg.strip())
+        except ValueError:
+            print("ERROR: Request ID must be a number")
+            return
+
+        session = self.SessionLocal()
+        try:
+            # Find the original request
+            original = session.query(PrintRequest).filter(
+                PrintRequest.id == request_id
+            ).first()
+
+            if not original:
+                print(f"ERROR: Request not found: {request_id}")
+                return
+
+            print(f"\n--- Retry Request {request_id} ---")
+            print(f"Type: {original.type}")
+            print(f"Status: {original.status}")
+            print(f"Priority: {'Yes' if original.is_priority else 'No'}")
+            print(f"Created: {original.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+
+            # Show preview of content
+            if original.message_content:
+                preview = original.message_content[:50].replace("\n", " ")
+                print(f"Message: {preview}{'...' if len(original.message_content) > 50 else ''}")
+            if original.image_content:
+                preview = original.image_content[:50] + "..."
+                print(f"Image: {preview}")
+
+            # Confirm retry
+            confirm = input(f"\nRetry this request? (y/n): ").strip().lower()
+            if confirm != 'y':
+                print("Cancelled")
+                return
+
+            # Create new print request with same content
+            try:
+                new_request = PrintRequest(
+                    type=original.type,
+                    message_content=original.message_content,
+                    image_content=original.image_content,
+                    submitter_ip=original.submitter_ip,
+                    is_priority=original.is_priority,
+                    friendship_token_name=original.friendship_token_name,
+                    status="queued"
+                )
+
+                session.add(new_request)
+                session.commit()
+                session.refresh(new_request)
+
+                print(f"\nRetry request created successfully!")
+                print(f"   New Request ID: {new_request.id}")
+                print(f"   Status: queued")
+                print(f"   Priority: {'Yes' if new_request.is_priority else 'No'}")
+
+            except Exception as e:
+                print(f"ERROR: Failed to create retry request: {e}")
+
+        finally:
+            session.close()
+
     # Queue Commands
 
     def do_list_queue(self, arg):
