@@ -66,7 +66,7 @@ class PrinterClient:
                  printer_profile: Optional[str] = None,
                  printer_in_ep: Optional[int] = None, printer_out_ep: Optional[int] = None,
                  printer_max_width_pixels: Optional[int] = None,
-                 font_path: Optional[str] = None):
+                 font_path: Optional[str] = None, no_printer: bool = False):
         """Initialize the printer client.
 
         Args:
@@ -81,6 +81,7 @@ class PrinterClient:
             printer_out_ep: USB OUT endpoint address (e.g., 0x04)
             printer_max_width_pixels: Maximum image width in pixels (hardware limit)
             font_path: Path to font file for text rendering
+            no_printer: If True, allow running without a physical printer for testing
         """
         self.server_url = server_url
         self.auth_token = auth_token
@@ -88,6 +89,7 @@ class PrinterClient:
         self.success_count = 0
         self.failure_count = 0
         self.printer = None
+        self.no_printer = no_printer
         self.printer_vendor_id = printer_vendor_id
         self.printer_product_id = printer_product_id
         self.printer_width_mm = printer_width_mm
@@ -317,10 +319,20 @@ class PrinterClient:
 
         Returns:
             True if printer initialized successfully, False otherwise
+
+        Raises:
+            RuntimeError: If printer is not configured and --no-printer is not set
         """
-        if not self.printer_profile or not self.printer_vendor_id or not self.printer_product_id:
-            self.logger.warning("Printer profile not configured. Skipping initialization.")
+        # Skip initialization if --no-printer is set
+        if self.no_printer:
+            self.logger.warning("--no-printer flag set. Running in testing mode without printer.")
             return False
+
+        if not self.printer_profile or not self.printer_vendor_id or not self.printer_product_id:
+            raise RuntimeError(
+                "Printer is not configured. Please configure printer settings in config.toml "
+                "or use --no-printer to run in testing mode."
+            )
 
         try:
             self.printer = Usb(
@@ -484,8 +496,13 @@ class PrinterClient:
         # All retries exhausted
         self.failure_count += 1
         self.logger.error(f"Print failed after {max_retries + 1} attempts ({self.success_count} / {self.failure_count})")
-        self.logger.error("Terminating client due to persistent printer failures")
-        sys.exit(1)
+
+        if not self.no_printer:
+            self.logger.error("Terminating client due to persistent printer failures")
+            sys.exit(1)
+
+        # In no-printer mode, continue running and process next job
+        return False
 
     async def run(self):
         """Main client loop - connect and process jobs."""
@@ -610,6 +627,11 @@ def main():
         action="store_true",
         help="Run a test print and exit (verifies printer is working)"
     )
+    parser.add_argument(
+        "--no-printer",
+        action="store_true",
+        help="Run without a physical printer (testing mode)"
+    )
     args = parser.parse_args()
 
     # Load configuration (look for config.toml in the client directory)
@@ -628,7 +650,8 @@ def main():
         printer_in_ep=config.get_printer_in_ep(),
         printer_out_ep=config.get_printer_out_ep(),
         printer_max_width_pixels=config.get_printer_max_width_pixels(),
-        font_path=config.get_font_path()
+        font_path=config.get_font_path(),
+        no_printer=args.no_printer
     )
 
     # Run in test mode or normal mode
