@@ -21,6 +21,6 @@ dpi = 203
 # If not specified, calculated from width_mm * dpi / 25.4
 max_width_pixels = 384
 
-# Font path for text rendering (optional)
-# If not specified, uses default PIL font
-# font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+# Font path for text rendering
+# I've added Fira Sans + Twemoji, since it looks nice on my printer
+font_path = "font/combined.ttf"

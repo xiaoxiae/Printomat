@@ -8,6 +8,10 @@ config.toml
 client/print
 server/alembic.ini
 
+# font stuff
+*.ttf
+merge.py
+
 # uv
 .venv
 .uv/

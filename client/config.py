@@ -7,6 +7,9 @@ class Config:
     """Load and manage configuration from .toml file."""
 
     def __init__(self, config_path: str = "config.toml"):
+        # Resolve config path relative to this client package directory
+        if not Path(config_path).is_absolute():
+            config_path = Path(__file__).parent / config_path
         self.config_path = Path(config_path)
         self._config: Dict[str, Any] = {}
         self.load()
@@ -85,4 +88,7 @@ class Config:
 
     def get_font_path(self) -> Optional[str]:
         """Get the path to the font file for text rendering."""
-        return self._config.get("printer", {}).get("font_path")
+        font_path = self._config.get("printer", {}).get("font_path")
+        if font_path and not Path(font_path).is_absolute():
+            font_path = str(Path(__file__).parent / font_path)
+        return font_path
