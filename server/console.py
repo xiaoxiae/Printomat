@@ -134,14 +134,24 @@ Type 'quit' to exit.
             print("\nNo friendship tokens configured.")
             return
 
-        rows = []
-        for token_data in tokens:
-            name = token_data.get("name", "N/A")
-            token_val = token_data.get("token", "N/A")
-            message = token_data.get("message", "")[:40]
-            rows.append([name, token_val[:8], message])
+        session = self.SessionLocal()
+        try:
+            rows = []
+            for token_data in tokens:
+                name = token_data.get("name", "N/A")
+                token_val = token_data.get("token", "N/A")
+                message = token_data.get("message", "")[:40]
 
-        print("\n" + tabulate(rows, headers=["Name", "Token", "Message"], tablefmt="grid"))
+                # Count prints for this token
+                print_count = session.query(PrintRequest).filter(
+                    PrintRequest.friendship_token_name == name
+                ).count()
+
+                rows.append([name, token_val, message, print_count])
+
+            print("\n" + tabulate(rows, headers=["Name", "Token", "Message", "Prints"], tablefmt="grid"))
+        finally:
+            session.close()
 
     def do_remove_token(self, arg):
         """Remove a friendship token by name.
@@ -280,9 +290,11 @@ Type 'quit' to exit.
                 # Show first 40 chars of message or image indicator
                 content = req.message_content or f"[{req.type.upper()}]"
                 preview = content[:40].replace("\n", " ")
-                rows.append([idx, req.id, req.type, priority, created, preview])
+                # Show token name if present, otherwise IP
+                identifier = req.friendship_token_name or req.submitter_ip
+                rows.append([idx, req.id, req.type, priority, created, identifier, preview])
 
-            print("\n" + tabulate(rows, headers=["Pos", "ID", "Type", "Priority", "Created", "Preview"], tablefmt="grid"))
+            print("\n" + tabulate(rows, headers=["Pos", "ID", "Type", "Priority", "Created", "Name/IP", "Preview"], tablefmt="grid"))
 
         finally:
             session.close()
@@ -329,9 +341,11 @@ Type 'quit' to exit.
                 created = req.created_at.strftime("%Y-%m-%d %H:%M:%S")
                 content = req.message_content or f"[{req.type.upper()}]"
                 preview = content[:30].replace("\n", " ")
-                rows.append([req.id, status, req.type, req.submitter_ip, created, preview])
+                # Show token name if present, otherwise IP
+                identifier = req.friendship_token_name or req.submitter_ip
+                rows.append([req.id, status, req.type, identifier, created, preview])
 
-            print("\n" + tabulate(rows, headers=["ID", "Status", "Type", "IP", "Created", "Preview"], tablefmt="grid"))
+            print("\n" + tabulate(rows, headers=["ID", "Status", "Type", "Name/IP", "Created", "Preview"], tablefmt="grid"))
 
         finally:
             session.close()
