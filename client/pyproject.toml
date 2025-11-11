@@ -1,0 +1,12 @@
+[project]
+name = "printomat-client"
+version = "0.1.0"
+description = "Printomat receipt printer client"
+dependencies = [
+    "pillow",
+    "python-escpos",
+    "pyusb",
+    "tomli",
+    "tomli_w",
+    "websockets",
+]

@@ -1,0 +1,16 @@
+[project]
+name = "printomat-server"
+version = "0.1.0"
+description = "Printomat receipt printer server"
+dependencies = [
+    "fastapi",
+    "jinja2",
+    "pydantic",
+    "python-multipart",
+    "sqlalchemy",
+    "tabulate",
+    "tomli",
+    "tomli_w",
+    "uvicorn[standard]",
+    "websockets",
+]

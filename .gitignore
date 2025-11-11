@@ -7,3 +7,7 @@ config.toml
 *.db
 client/print
 server/alembic.ini
+
+# uv
+.venv
+.uv/
