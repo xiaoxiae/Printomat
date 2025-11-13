@@ -142,6 +142,23 @@ class PrinterClient:
             orig_width, orig_height = image.size
             self.logger.info(f"Image loaded: {orig_width}x{orig_height} pixels")
 
+            # Check aspect ratio and crop if needed to fit 9:16 (width:height) constraint
+            # Max allowed height = width * 16/9
+            was_cropped = False
+            max_allowed_height = int(orig_width * 16 / 9)
+            if orig_height > max_allowed_height:
+                # Crop the center of the image to fit 9:16 aspect ratio
+                excess_height = orig_height - max_allowed_height
+                top = excess_height // 2
+                bottom = top + max_allowed_height
+                image = image.crop((0, top, orig_width, bottom))
+                self.logger.info(
+                    f"Image aspect ratio exceeded 9:16 limit. "
+                    f"Cropped from {orig_width}x{orig_height} to {orig_width}x{max_allowed_height}"
+                )
+                orig_height = max_allowed_height
+                was_cropped = True
+
             # Resize to printer width (respecting hardware limits)
             target_width_pixels = self.target_width_pixels
 
@@ -157,6 +174,24 @@ class PrinterClient:
                 (target_width_pixels, target_height_pixels),
                 Image.Resampling.LANCZOS
             )
+
+            # Convert to RGB mode to ensure compatibility with GIF format
+            if resized.mode != 'RGB':
+                resized = resized.convert('RGB')
+
+            # Add crop indicator dots if image was cropped
+            if was_cropped:
+                crop_indicator = self._create_crop_indicator()
+                spacer = self._create_spacer(height_pixels=3)
+                # Concatenate: indicator + spacer + image + spacer + indicator
+                images_with_indicator = [
+                    crop_indicator,
+                    spacer,
+                    resized,
+                    spacer,
+                    crop_indicator
+                ]
+                resized = self._concatenate_images_vertically(images_with_indicator)
 
             # Convert to bytes for saving
             output = io.BytesIO()
@@ -313,6 +348,33 @@ class PrinterClient:
             PIL Image containing a black horizontal line
         """
         return Image.new('RGB', (self.target_width_pixels, thickness_pixels), 'black')
+
+    def _create_crop_indicator(self, height_pixels: int = 10) -> Image.Image:
+        """Create a visual indicator showing image was cropped (row of dots).
+
+        Args:
+            height_pixels: Height of the indicator strip in pixels
+
+        Returns:
+            PIL Image containing dots pattern
+        """
+        indicator = Image.new('RGB', (self.target_width_pixels, height_pixels), 'white')
+        draw = ImageDraw.Draw(indicator)
+
+        # Draw dots across the width
+        dot_radius = 2
+        dot_spacing = 15
+        x = dot_radius + 5
+        y = height_pixels // 2
+
+        while x < self.target_width_pixels:
+            draw.ellipse(
+                [(x - dot_radius, y - dot_radius), (x + dot_radius, y + dot_radius)],
+                fill='black'
+            )
+            x += dot_spacing
+
+        return indicator
 
     def _initialize_printer(self) -> bool:
         """Initialize connection to ESC/POS printer via USB.
