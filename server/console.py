@@ -137,7 +137,7 @@ Type 'quit' to exit.
         session = self.SessionLocal()
         try:
             rows = []
-            for token_data in tokens:
+            for token_data in sorted(tokens, key=lambda t: t.get("name", "").lower()):
                 name = token_data.get("name", "N/A")
                 token_val = token_data.get("token", "N/A")
                 message = token_data.get("message", "")[:40]
@@ -329,7 +329,7 @@ Type 'quit' to exit.
             if status_filter:
                 query = query.filter(PrintRequest.status == status_filter)
 
-            results = query.order_by(PrintRequest.created_at.desc()).limit(limit).all()
+            results = query.order_by(PrintRequest.created_at.asc()).limit(limit).all()
 
             if not results:
                 print(f"\nNo requests found")
