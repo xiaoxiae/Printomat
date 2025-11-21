@@ -7,6 +7,7 @@ path = "receipt_printer.db"
 
 [printer]
 auth_token = "secret-printer-token-here"
+sleeping_message = "Printer is asleep, queueing."
 
 # Friendship tokens
 # Token values will be auto-generated if omitted

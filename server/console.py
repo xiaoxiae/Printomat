@@ -28,6 +28,38 @@ Type 'quit' to exit.
         self.config = config
         self.SessionLocal = session_local
 
+    # Printer Configuration Commands
+
+    def do_get_sleeping_message(self, arg):
+        """Get the current printer sleeping message."""
+        message = self.config.get_printer_sleeping_message()
+        print(f"\nCurrent printer sleeping message:")
+        print(f"  {message}")
+
+    def do_set_sleeping_message(self, arg):
+        """Set the printer sleeping message.
+
+        Usage: set_sleeping_message <message>
+        The message is displayed when the printer is disconnected.
+        """
+        if not arg:
+            print("ERROR: Please provide a message")
+            return
+
+        message = arg.strip()
+        if not message:
+            print("ERROR: Message cannot be empty")
+            return
+
+        # Update config
+        if "printer" not in self.config._config:
+            self.config._config["printer"] = {}
+
+        self.config._config["printer"]["sleeping_message"] = message
+        self.config._save()
+        print(f"Printer sleeping message updated:")
+        print(f"  {message}")
+
     # Token Management Commands
 
     def do_add_token(self, arg):

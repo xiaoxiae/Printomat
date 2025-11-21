@@ -7,7 +7,7 @@
         minutes!
     </p>
     {% endif %} {% else %}
-    <p>Printer is asleep, queueing.</p>
+    <p>{{ printer_sleeping_message }}</p>
     {% endif %} {% if is_priority %}
     <em>{{ message }}</em>
     {% endif %}

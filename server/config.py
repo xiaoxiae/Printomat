@@ -108,6 +108,10 @@ class Config:
         """Get the printer client authentication token."""
         return self._config.get("printer", {}).get("auth_token", "")
 
+    def get_printer_sleeping_message(self) -> str:
+        """Get the message displayed when printer is sleeping/disconnected."""
+        return self._config.get("printer", {}).get("sleeping_message", "Printer is sleeping...")
+
     def get_friendship_tokens(self) -> list:
         """Get all configured friendship tokens."""
         return self._config.get("friendship_tokens", [])

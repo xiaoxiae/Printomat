@@ -437,7 +437,8 @@ async def submit_print_request(request: Request):
                         "message": message,
                         "estimated_wait_minutes": estimated_wait_minutes,
                         "position": position,
-                        "printer_connected": printer_is_connected
+                        "printer_connected": printer_is_connected,
+                        "printer_sleeping_message": config.get_printer_sleeping_message()
                     }
                 )
         except Exception as e:
