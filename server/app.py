@@ -91,6 +91,12 @@ queue_max_size = config.get_queue_max_size()
 # Global printer connection status
 printer_connected = False
 
+# Global service connections (service_name -> websocket)
+connected_services = {}
+
+# Event loop reference for console to send messages
+main_event_loop = None
+
 # Console thread reference for shutdown
 console_thread = None
 
@@ -182,15 +188,18 @@ def get_queue_position(request_id: int, session) -> int:
 @app.on_event("startup")
 async def startup_event():
     """Initialize on server startup."""
-    global console_thread
+    global console_thread, main_event_loop
     logger.info("Server starting up...")
     logger.info(f"Database: {config.get_database_url()}")
+
+    # Store event loop reference for console
+    main_event_loop = asyncio.get_event_loop()
 
     try:
         # Start interactive console in a separate daemon thread
         console_thread = threading.Thread(
             target=run_console,
-            args=(config, SessionLocal),
+            args=(config, SessionLocal, connected_services, main_event_loop),
             daemon=True
         )
         console_thread.start()
@@ -318,6 +327,7 @@ async def _process_submit_request(message: Optional[str], image: Optional[str], 
                 message_content=message,
                 image_content=image,
                 submitter_ip=client_ip,
+                source_type="user",
                 is_priority=bool(token_data),
                 friendship_token_name=token_data.get("name") if token_data else None,
                 status="queued"  # Always start as queued, will be sent by WebSocket handler
@@ -599,3 +609,100 @@ async def websocket_printer_endpoint(websocket: WebSocket):
     except Exception as e:
         printer_connected = False
         logger.error(f"WebSocket error: {e}", exc_info=True)
+
+
+@app.websocket("/ws/service")
+async def websocket_service_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for external services.
+
+    Services authenticate with a shared service token and identify themselves by name.
+    They can:
+    - Receive messages from the server
+    - Send print requests back to the server
+    """
+    global connected_services
+
+    # Get auth token and service name from query parameters
+    auth_token = websocket.query_params.get("token")
+    service_name = websocket.query_params.get("name")
+    expected_token = config.get_service_token()
+
+    # Validate token
+    if not auth_token or auth_token != expected_token:
+        logger.warning(f"Service connection rejected: invalid/missing token")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+        return
+
+    # Validate service name
+    if not service_name:
+        logger.warning(f"Service connection rejected: missing name parameter")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing name parameter")
+        return
+
+    await websocket.accept()
+    connected_services[service_name] = websocket
+    logger.info(f"Service '{service_name}' connected (remote: {websocket.client})")
+
+    try:
+        while True:
+            # Wait for messages from the service (print requests)
+            message_text = await websocket.receive_text()
+
+            try:
+                message_data = json.loads(message_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse message from service '{service_name}': {e}")
+                continue
+
+            # Extract message and/or image
+            message_content = message_data.get("message")
+            image_content = message_data.get("image")
+
+            # Validate that at least one is provided
+            if not message_content and not image_content:
+                logger.warning(f"Service '{service_name}' sent empty print request")
+                continue
+
+            # Create print request in database
+            session = SessionLocal()
+            try:
+                # Determine content type
+                if message_content and image_content:
+                    content_type = "mixed"
+                elif image_content:
+                    content_type = "image"
+                else:
+                    content_type = "text"
+
+                # Create priority print request from service
+                print_request = PrintRequest(
+                    type=content_type,
+                    message_content=message_content,
+                    image_content=image_content,
+                    submitter_ip=service_name,
+                    source_type="service",
+                    is_priority=True,  # Service messages are priority
+                    friendship_token_name=service_name,
+                    status="queued"
+                )
+
+                session.add(print_request)
+                session.commit()
+                session.refresh(print_request)
+
+                logger.info(f"Service '{service_name}' queued print request (id: {print_request.id}, type: {content_type})")
+
+            except Exception as e:
+                logger.error(f"Failed to create print request from service '{service_name}': {e}", exc_info=True)
+            finally:
+                session.close()
+
+    except WebSocketDisconnect:
+        logger.info(f"Service '{service_name}' disconnected")
+    except Exception as e:
+        logger.error(f"WebSocket error for service '{service_name}': {e}", exc_info=True)
+    finally:
+        # Remove from connected services
+        if service_name in connected_services:
+            del connected_services[service_name]
+            logger.info(f"Service '{service_name}' removed from connected services")

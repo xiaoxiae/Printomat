@@ -3,10 +3,13 @@ name = "printomat-server"
 version = "0.1.0"
 description = "Printomat receipt printer server"
 dependencies = [
+    "alembic",
     "fastapi",
     "jinja2",
+    "matplotlib",
     "pydantic",
     "python-multipart",
+    "requests",
     "sqlalchemy",
     "tabulate",
     "tomli",

@@ -15,6 +15,7 @@ class PrintRequest(Base):
     message_content = Column(Text, nullable=True)  # Text message (optional)
     image_content = Column(Text, nullable=True)  # Base64-encoded image (optional)
     submitter_ip = Column(String(45), nullable=False, index=True)
+    source_type = Column(String(20), nullable=False, default="user", index=True)
     is_priority = Column(Boolean, default=False)
     friendship_token_name = Column(String(255), nullable=True)
     status = Column(String(20), nullable=False, index=True)  # queued, printing, printed, failed

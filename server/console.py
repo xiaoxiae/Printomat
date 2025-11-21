@@ -4,7 +4,9 @@
 import cmd
 import secrets
 import os
-from typing import Optional
+import json
+import asyncio
+from typing import Optional, Dict, Any
 from tabulate import tabulate
 from .config import Config
 from .models import PrintRequest
@@ -23,10 +25,12 @@ Type 'quit' to exit.
 
     prompt = "printomat> "
 
-    def __init__(self, config: Config, session_local, *args, **kwargs):
+    def __init__(self, config: Config, session_local, connected_services: Dict[str, Any], event_loop=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.config = config
         self.SessionLocal = session_local
+        self.connected_services = connected_services
+        self.event_loop = event_loop
 
     # Printer Configuration Commands
 
@@ -221,6 +225,82 @@ Type 'quit' to exit.
         except ValueError as e:
             print(f"ERROR: {e}")
 
+    # Service Management Commands
+
+    def do_list_services(self, arg):
+        """List all connected services."""
+        if not self.connected_services:
+            print("\nNo services connected.")
+            return
+
+        rows = []
+        for service_name, websocket in self.connected_services.items():
+            # Get client info if available
+            client_info = f"{websocket.client}" if websocket.client else "unknown"
+            rows.append([service_name, client_info])
+
+        print("\n" + tabulate(rows, headers=["Service Name", "Client"], tablefmt="grid"))
+
+    def do_send_to_service(self, arg):
+        """Send a message to a connected service.
+
+        Usage: send_to_service <service_name> <message>
+        Example: send_to_service echo "hello world"
+        """
+        if not arg:
+            print("ERROR: Please specify service name and message")
+            print("Usage: send_to_service <service_name> <message>")
+            return
+
+        # Parse service name and message
+        parts = arg.split(None, 1)
+        if len(parts) < 2:
+            print("ERROR: Please specify both service name and message")
+            print("Usage: send_to_service <service_name> <message>")
+            return
+
+        service_name = parts[0]
+        message = parts[1].strip()
+
+        # Remove surrounding quotes if present
+        if message.startswith('"') and message.endswith('"'):
+            message = message[1:-1]
+        elif message.startswith("'") and message.endswith("'"):
+            message = message[1:-1]
+
+        # Check if service is connected
+        if service_name not in self.connected_services:
+            print(f"ERROR: Service '{service_name}' is not connected")
+            print("\nConnected services:")
+            if self.connected_services:
+                for name in self.connected_services.keys():
+                    print(f"  - {name}")
+            else:
+                print("  (none)")
+            return
+
+        # Send message to service
+        websocket = self.connected_services[service_name]
+        message_data = {"message": message}
+
+        if not self.event_loop:
+            print("ERROR: Event loop not available. Cannot send message to service.")
+            return
+
+        try:
+            # Schedule the coroutine to run in the main event loop
+            future = asyncio.run_coroutine_threadsafe(
+                websocket.send_text(json.dumps(message_data)),
+                self.event_loop
+            )
+            # Wait for completion with timeout
+            future.result(timeout=5.0)
+            print(f"Message sent to service '{service_name}': {message}")
+        except TimeoutError:
+            print(f"ERROR: Timeout while sending message to service '{service_name}'")
+        except Exception as e:
+            print(f"ERROR: Failed to send message to service '{service_name}': {e}")
+
     # Print Management Commands
 
     def do_retry(self, arg):
@@ -277,6 +357,7 @@ Type 'quit' to exit.
                     message_content=original.message_content,
                     image_content=original.image_content,
                     submitter_ip=original.submitter_ip,
+                    source_type=original.source_type,
                     is_priority=original.is_priority,
                     friendship_token_name=original.friendship_token_name,
                     status="queued"
@@ -318,15 +399,16 @@ Type 'quit' to exit.
             rows = []
             for idx, req in enumerate(queued, 1):
                 priority = "YES" if req.is_priority else "NO"
+                source = req.source_type.upper() if req.source_type else "USER"
                 created = req.created_at.strftime("%Y-%m-%d %H:%M:%S")
                 # Show first 40 chars of message or image indicator
                 content = req.message_content or f"[{req.type.upper()}]"
                 preview = content[:40].replace("\n", " ")
                 # Show token name if present, otherwise IP
                 identifier = req.friendship_token_name or req.submitter_ip
-                rows.append([idx, req.id, req.type, priority, created, identifier, preview])
+                rows.append([idx, req.id, req.type, source, priority, created, identifier, preview])
 
-            print("\n" + tabulate(rows, headers=["Pos", "ID", "Type", "Priority", "Created", "Name/IP", "Preview"], tablefmt="grid"))
+            print("\n" + tabulate(rows, headers=["Pos", "ID", "Type", "Source", "Priority", "Created", "Name/IP", "Preview"], tablefmt="grid"))
 
         finally:
             session.close()
@@ -370,14 +452,15 @@ Type 'quit' to exit.
             rows = []
             for req in results:
                 status = req.status
+                source = req.source_type.upper() if req.source_type else "USER"
                 created = req.created_at.strftime("%Y-%m-%d %H:%M:%S")
                 content = req.message_content or f"[{req.type.upper()}]"
                 preview = content[:30].replace("\n", " ")
                 # Show token name if present, otherwise IP
                 identifier = req.friendship_token_name or req.submitter_ip
-                rows.append([req.id, status, req.type, identifier, created, preview])
+                rows.append([req.id, status, req.type, source, identifier, created, preview])
 
-            print("\n" + tabulate(rows, headers=["ID", "Status", "Type", "Name/IP", "Created", "Preview"], tablefmt="grid"))
+            print("\n" + tabulate(rows, headers=["ID", "Status", "Type", "Source", "Name/IP", "Created", "Preview"], tablefmt="grid"))
 
         finally:
             session.close()
@@ -404,9 +487,9 @@ Type 'quit' to exit.
             print(f"Unknown command: '{line}'. Type 'help' for available commands.")
 
 
-def run_console(config: Config, session_local):
+def run_console(config: Config, session_local, connected_services: Dict[str, Any], event_loop=None):
     """Run the interactive console."""
-    console = PrintomatConsole(config, session_local)
+    console = PrintomatConsole(config, session_local, connected_services, event_loop)
     try:
         console.cmdloop()
     except KeyboardInterrupt:

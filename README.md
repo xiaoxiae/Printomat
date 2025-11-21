@@ -22,10 +22,13 @@ N/A
   - uses [FastAPI](https://github.com/fastapi/fastapi)
   - implements IP-based timeouts so the printer doesn't die
   - supports **friendship tokens**, which can be given to users to skip time-outs
+  - communicates with the printer and services via websockets
 - [`client`](client/): connects to the server and prints things
-  - uses websockets
   - handles the printing via [Python-ESC/POS](https://github.com/python-escpos/python-escpos)
   - prints images created via [Pillow](https://pillow.readthedocs.io/en/latest/)
+- [`services`](services/): custom scripts to print custom things
+  - [`services/echo_service.py`](services/echo_service.py) -- echo messages from server
+  - [`services/weather_service.py`](services/weather_service.py) -- periodically prints daily forecast
 
 To run, use
 
