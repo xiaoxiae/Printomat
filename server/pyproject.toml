@@ -4,10 +4,12 @@ version = "0.1.0"
 description = "Printomat receipt printer server"
 dependencies = [
     "alembic",
+    "cairosvg>=2.8.2",
     "fastapi",
     "jinja2",
     "matplotlib",
     "pydantic",
+    "python-chess>=1.999",
     "python-multipart",
     "requests",
     "sqlalchemy",
