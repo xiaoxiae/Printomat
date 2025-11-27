@@ -40,12 +40,11 @@ class WeatherService(BaseService):
             print_minute: Minute of hour to print (0-59, default: 0)
             print_on_start: Whether to print immediately on startup (default: False)
         """
-        super().__init__(server_url, service_name, service_token)
+        super().__init__(server_url, service_name, service_token, print_on_start)
         self.latitude = latitude
         self.longitude = longitude
         self.print_hour = print_hour
         self.print_minute = print_minute
-        self.print_on_start = print_on_start
 
     def _fetch_weather_data(self) -> Optional[dict]:
         """Fetch weather data from Open-Meteo API.
@@ -208,13 +207,14 @@ class WeatherService(BaseService):
 
 
     @classmethod
-    def from_config(cls, server_url: str, service_name: str, service_token: str, config):
+    def from_config(cls, server_url: str, service_name: str, service_token: str, print_on_start: bool, config):
         """Create a WeatherService instance from configuration.
 
         Args:
             server_url: HTTP URL of the server
             service_name: Name of the service
             service_token: Authentication token
+            print_on_start: Whether to print immediately on startup
             config: ServiceConfig instance
 
         Returns:
@@ -227,7 +227,6 @@ class WeatherService(BaseService):
         longitude = service_config.get("longitude", 0.0)
         print_hour = service_config.get("print_hour", 8)
         print_minute = service_config.get("print_minute", 0)
-        print_on_start = service_config.get("print_on_start", False)
 
         # Validate required settings
         if latitude == 0.0 or longitude == 0.0:

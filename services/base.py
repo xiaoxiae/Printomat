@@ -1,5 +1,6 @@
 """Base class for Printomat services."""
 
+import argparse
 import asyncio
 import logging
 import sys
@@ -18,17 +19,19 @@ class BaseService(ABC):
     - Send print requests to the server via HTTP POST
     """
 
-    def __init__(self, server_url: str, service_name: str, service_token: str):
+    def __init__(self, server_url: str, service_name: str, service_token: str, print_on_start: bool = False):
         """Initialize the service.
 
         Args:
             server_url: HTTP URL of the server (e.g., "http://localhost:8000")
             service_name: Name to identify this service
             service_token: Authentication token for services
+            print_on_start: Whether to print immediately on startup (default: False)
         """
         self.server_url = server_url
         self.service_name = service_name
         self.service_token = service_token
+        self.print_on_start = print_on_start
         self.logger = self._setup_logger()
         self._running = False
 
@@ -123,6 +126,15 @@ class BaseService(ABC):
         of the service, and runs it. The service name is automatically derived
         from the class name.
         """
+        # Parse command-line arguments
+        parser = argparse.ArgumentParser(description=f"Run {cls.__name__}")
+        parser.add_argument(
+            '--print',
+            action='store_true',
+            help='Print immediately on startup'
+        )
+        args = parser.parse_args()
+
         # Derive service name from class name (e.g., EchoService -> echo)
         service_name = cls.__name__
         if service_name.endswith("Service"):
@@ -150,16 +162,22 @@ class BaseService(ABC):
         # Get service-specific config
         service_config = config.get_service_config(service_name)
 
+        # Determine print_on_start: command-line flag takes precedence over config
+        print_on_start = args.print or service_config.get("print_on_start", False)
+
         # Create service instance with config
         service = cls.from_config(
             server_url=server_url,
             service_name=service_name,
             service_token=service_token,
+            print_on_start=print_on_start,
             config=config
         )
 
         print(f"Starting {service_name} service...")
         print(f"Server: {server_url}")
+        if print_on_start:
+            print(f"Print on startup: enabled")
 
         try:
             asyncio.run(service.run())
@@ -167,7 +185,7 @@ class BaseService(ABC):
             print(f"\n{service_name.title()} service stopped by user")
 
     @classmethod
-    def from_config(cls, server_url: str, service_name: str, service_token: str, config):
+    def from_config(cls, server_url: str, service_name: str, service_token: str, print_on_start: bool, config):
         """Create a service instance from configuration.
 
         Subclasses can override this to extract service-specific settings.
@@ -176,6 +194,7 @@ class BaseService(ABC):
             server_url: HTTP URL of the server
             service_name: Name of the service
             service_token: Authentication token
+            print_on_start: Whether to print immediately on startup
             config: ServiceConfig instance
 
         Returns:
@@ -184,5 +203,6 @@ class BaseService(ABC):
         return cls(
             server_url=server_url,
             service_name=service_name,
-            service_token=service_token
+            service_token=service_token,
+            print_on_start=print_on_start
         )
