@@ -100,7 +100,7 @@ class WeatherService(BaseService):
             hours = [t.hour for t in plot_times]
 
             # Create figure with two subplots
-            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 4), sharex=True)
 
             # Temperature plot
             ax1.plot(hours, plot_temps, color='gray', linewidth=2)
