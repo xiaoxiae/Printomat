@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Echo service for Printomat - echoes messages back as print requests."""
+"""Echo service for Printomat - reads from stdin and sends to printer."""
 
 import asyncio
 
@@ -7,28 +7,7 @@ from base import BaseService
 
 
 class EchoService(BaseService):
-    """Simple echo service that sends received messages back to the printer.
-    """
-
-    async def receive(self, message: dict) -> None:
-        """Handle a message received from the server.
-
-        Echo the message back as a print request.
-
-        Args:
-            message: JSON message from the server (e.g., {"message": "hello"})
-        """
-        self.logger.info(f"Received message: {message}")
-
-        # Extract the message content
-        message_text = message.get("message", "")
-
-        if message_text:
-            # Echo it back as a print request
-            await self.send_print_request(message=message_text)
-            self.logger.info(f"Echoed message: {message_text}")
-        else:
-            self.logger.warning("Received empty message, nothing to echo")
+    """Simple echo service that reads from stdin and sends to the printer."""
 
     async def loop(self) -> None:
         """Service-specific loop.

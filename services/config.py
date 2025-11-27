@@ -38,8 +38,8 @@ class ServiceConfig:
 
     # Global settings
     def get_server_url(self) -> str:
-        """Get the server WebSocket URL."""
-        return self._config.get("global", {}).get("server_url", "ws://localhost:9900")
+        """Get the server HTTP URL."""
+        return self._config.get("global", {}).get("server_url", "http://localhost:8000")
 
     def get_service_token(self) -> str:
         """Get the service authentication token."""

@@ -91,12 +91,6 @@ queue_max_size = config.get_queue_max_size()
 # Global printer connection status
 printer_connected = False
 
-# Global service connections (service_name -> websocket)
-connected_services = {}
-
-# Event loop reference for console to send messages
-main_event_loop = None
-
 # Console thread reference for shutdown
 console_thread = None
 
@@ -188,18 +182,15 @@ def get_queue_position(request_id: int, session) -> int:
 @app.on_event("startup")
 async def startup_event():
     """Initialize on server startup."""
-    global console_thread, main_event_loop
+    global console_thread
     logger.info("Server starting up...")
     logger.info(f"Database: {config.get_database_url()}")
-
-    # Store event loop reference for console
-    main_event_loop = asyncio.get_event_loop()
 
     try:
         # Start interactive console in a separate daemon thread
         console_thread = threading.Thread(
             target=run_console,
-            args=(config, SessionLocal, connected_services, main_event_loop),
+            args=(config, SessionLocal),
             daemon=True
         )
         console_thread.start()
@@ -246,22 +237,33 @@ async def _process_submit_request(message: Optional[str], image: Optional[str], 
 
         # Check if token is provided and validate it
         token_data = None
-        if token:
-            token_data = config.get_friendship_token_by_value(token)
-            if not token_data:
-                # Invalid token provided
-                logger.warning(f"Invalid friendship token provided from {client_ip}")
-                response = {
-                    "error": "invalid_token",
-                    "message": "Invalid friendship token"
-                }
-                if is_form_submission:
-                    return response, 400, True
-                return JSONResponse(status_code=400, content=response)
-            logger.debug(f"Valid friendship token used from {client_ip} (label: {token_data.get('label')})")
+        is_service = False
+        service_name = None
 
-        # If not a friendship token user, check rate limit
-        if not token_data:
+        if token:
+            # First check if it's a service token
+            service_token = config.get_service_token()
+            if token == service_token:
+                is_service = True
+                service_name = client_ip  # Use IP as service identifier
+                logger.debug(f"Valid service token used from {client_ip}")
+            else:
+                # If not a service token, check friendship tokens
+                token_data = config.get_friendship_token_by_value(token)
+                if not token_data:
+                    # Invalid token provided
+                    logger.warning(f"Invalid token provided from {client_ip}")
+                    response = {
+                        "error": "invalid_token",
+                        "message": "Invalid token"
+                    }
+                    if is_form_submission:
+                        return response, 400, True
+                    return JSONResponse(status_code=400, content=response)
+                logger.debug(f"Valid friendship token used from {client_ip} (label: {token_data.get('label')})")
+
+        # If not a friendship token user or service, check rate limit
+        if not token_data and not is_service:
             is_allowed, minutes_until_retry = check_rate_limit(client_ip, session)
             if not is_allowed:
                 logger.warning(f"Rate limit exceeded for {client_ip} (retry in {minutes_until_retry} minutes)")
@@ -273,8 +275,8 @@ async def _process_submit_request(message: Optional[str], image: Optional[str], 
                     return response, 429, True
                 return JSONResponse(status_code=429, content=response)
 
-        # Check if queue is full (only for non-priority users)
-        if not token_data:
+        # Check if queue is full (only for non-priority users and non-services)
+        if not token_data and not is_service:
             queued_count = session.query(PrintRequest).filter(
                 PrintRequest.status.in_(["queued", "printing"])
             ).count()
@@ -322,14 +324,28 @@ async def _process_submit_request(message: Optional[str], image: Optional[str], 
 
         # Create print request in database
         try:
+            # Determine source type and priority
+            if is_service:
+                source_type = "service"
+                is_priority = True
+                sender_name = service_name
+            elif token_data:
+                source_type = "user"
+                is_priority = True
+                sender_name = token_data.get("name")
+            else:
+                source_type = "user"
+                is_priority = False
+                sender_name = None
+
             print_request = PrintRequest(
                 type=content_type,
                 message_content=message,
                 image_content=image,
                 submitter_ip=client_ip,
-                source_type="user",
-                is_priority=bool(token_data),
-                friendship_token_name=token_data.get("name") if token_data else None,
+                source_type=source_type,
+                is_priority=is_priority,
+                friendship_token_name=sender_name,
                 status="queued"  # Always start as queued, will be sent by WebSocket handler
             )
 
@@ -350,10 +366,21 @@ async def _process_submit_request(message: Optional[str], image: Optional[str], 
         position = get_queue_position(print_request.id, session)
         estimated_wait = position * 1  # 1 minute per position
 
-        # If friendship token user, they should be printed immediately
+        # If service or friendship token user, they should be printed immediately
         # In the spec, priority users bypass queue but still need to be queued
         # They will just be at the front of the queue
-        if token_data:
+        if is_service:
+            logger.info(f"Service request queued from {client_ip} (request_id: {print_request.id}, type: {content_type})")
+            response = {
+                "status": "queued",
+                "position": position,
+                "estimated_wait_minutes": estimated_wait,
+                "printer_connected": printer_connected
+            }
+            if is_form_submission:
+                return response, 200, False
+            return response
+        elif token_data:
             logger.info(f"Priority request queued from {client_ip} (request_id: {print_request.id}, type: {content_type})")
             response = {
                 "status": "printing_immediately",
@@ -611,98 +638,3 @@ async def websocket_printer_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}", exc_info=True)
 
 
-@app.websocket("/ws/service")
-async def websocket_service_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for external services.
-
-    Services authenticate with a shared service token and identify themselves by name.
-    They can:
-    - Receive messages from the server
-    - Send print requests back to the server
-    """
-    global connected_services
-
-    # Get auth token and service name from query parameters
-    auth_token = websocket.query_params.get("token")
-    service_name = websocket.query_params.get("name")
-    expected_token = config.get_service_token()
-
-    # Validate token
-    if not auth_token or auth_token != expected_token:
-        logger.warning(f"Service connection rejected: invalid/missing token")
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
-        return
-
-    # Validate service name
-    if not service_name:
-        logger.warning(f"Service connection rejected: missing name parameter")
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing name parameter")
-        return
-
-    await websocket.accept()
-    connected_services[service_name] = websocket
-    logger.info(f"Service '{service_name}' connected (remote: {websocket.client})")
-
-    try:
-        while True:
-            # Wait for messages from the service (print requests)
-            message_text = await websocket.receive_text()
-
-            try:
-                message_data = json.loads(message_text)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse message from service '{service_name}': {e}")
-                continue
-
-            # Extract message and/or image
-            message_content = message_data.get("message")
-            image_content = message_data.get("image")
-
-            # Validate that at least one is provided
-            if not message_content and not image_content:
-                logger.warning(f"Service '{service_name}' sent empty print request")
-                continue
-
-            # Create print request in database
-            session = SessionLocal()
-            try:
-                # Determine content type
-                if message_content and image_content:
-                    content_type = "mixed"
-                elif image_content:
-                    content_type = "image"
-                else:
-                    content_type = "text"
-
-                # Create priority print request from service
-                print_request = PrintRequest(
-                    type=content_type,
-                    message_content=message_content,
-                    image_content=image_content,
-                    submitter_ip=service_name,
-                    source_type="service",
-                    is_priority=True,  # Service messages are priority
-                    friendship_token_name=service_name,
-                    status="queued"
-                )
-
-                session.add(print_request)
-                session.commit()
-                session.refresh(print_request)
-
-                logger.info(f"Service '{service_name}' queued print request (id: {print_request.id}, type: {content_type})")
-
-            except Exception as e:
-                logger.error(f"Failed to create print request from service '{service_name}': {e}", exc_info=True)
-            finally:
-                session.close()
-
-    except WebSocketDisconnect:
-        logger.info(f"Service '{service_name}' disconnected")
-    except Exception as e:
-        logger.error(f"WebSocket error for service '{service_name}': {e}", exc_info=True)
-    finally:
-        # Remove from connected services
-        if service_name in connected_services:
-            del connected_services[service_name]
-            logger.info(f"Service '{service_name}' removed from connected services")

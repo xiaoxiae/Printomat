@@ -1,14 +1,11 @@
 """Base class for Printomat services."""
 
 import asyncio
-import json
 import logging
 import sys
 from abc import ABC, abstractmethod
 from typing import Optional
-import websockets
-
-from websockets.client import WebSocketClientProtocol
+import aiohttp
 
 from config import ServiceConfig
 
@@ -17,23 +14,21 @@ class BaseService(ABC):
     """Base class for services that connect to the Printomat server.
 
     Services can:
-    - Receive messages from the server via the receive() method
     - Run periodic tasks via the loop() method
-    - Send print requests back to the server
+    - Send print requests to the server via HTTP POST
     """
 
     def __init__(self, server_url: str, service_name: str, service_token: str):
         """Initialize the service.
 
         Args:
-            server_url: WebSocket URL of the server (e.g., "ws://localhost:9900")
+            server_url: HTTP URL of the server (e.g., "http://localhost:8000")
             service_name: Name to identify this service
             service_token: Authentication token for services
         """
         self.server_url = server_url
         self.service_name = service_name
         self.service_token = service_token
-        self.websocket: Optional[WebSocketClientProtocol] = None
         self.logger = self._setup_logger()
         self._running = False
 
@@ -64,15 +59,6 @@ class BaseService(ABC):
         return logger
 
     @abstractmethod
-    async def receive(self, message: dict) -> None:
-        """Handle a message received from the server.
-
-        Args:
-            message: JSON message from the server (e.g., {"message": "hello"})
-        """
-        pass
-
-    @abstractmethod
     async def loop(self) -> None:
         """Service-specific loop for periodic tasks.
 
@@ -90,101 +76,44 @@ class BaseService(ABC):
             message: Text message to print
             image: Base64-encoded image to print
         """
-        if not self.websocket:
-            self.logger.error("Cannot send print request: not connected")
-            return
-
         if not message and not image:
             self.logger.error("Cannot send print request: at least message or image must be provided")
             return
 
-        data = {}
+        data = {"token": self.service_token}
         if message:
             data["message"] = message
         if image:
             data["image"] = image
 
         try:
-            await self.websocket.send(json.dumps(data))
-            self.logger.info(f"Sent print request (message={bool(message)}, image={bool(image)})")
+            submit_url = f"{self.server_url}/submit"
+            async with aiohttp.ClientSession() as session:
+                async with session.post(submit_url, json=data) as response:
+                    if response.status == 200:
+                        response_data = await response.json()
+                        self.logger.info(f"Print request queued successfully (message={bool(message)}, image={bool(image)})")
+                    else:
+                        response_text = await response.text()
+                        self.logger.error(f"Failed to send print request: HTTP {response.status} - {response_text}")
         except Exception as e:
             self.logger.error(f"Failed to send print request: {e}")
 
-    async def _receive_handler(self) -> None:
-        """Handle incoming messages from the server."""
-        try:
-            async for message_text in self.websocket:
-                try:
-                    message_data = json.loads(message_text)
-                    self.logger.debug(f"Received message: {message_data}")
-                    await self.receive(message_data)
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"Failed to parse message JSON: {e}")
-                except Exception as e:
-                    self.logger.error(f"Error handling received message: {e}", exc_info=True)
-        except websockets.exceptions.ConnectionClosed:
-            self.logger.info("Connection closed by server")
-        except Exception as e:
-            self.logger.error(f"Error in receive handler: {e}", exc_info=True)
-        finally:
-            self._running = False
+    async def run(self) -> None:
+        """Run the service.
 
-    async def _loop_handler(self) -> None:
-        """Run the service's loop method."""
+        This method runs the service's loop method.
+        """
+        self.logger.info(f"Starting '{self.service_name}' service...")
+
         try:
+            self._running = True
             await self.loop()
         except Exception as e:
             self.logger.error(f"Error in service loop: {e}", exc_info=True)
         finally:
             self._running = False
-
-    async def run(self) -> None:
-        """Connect to the server and run the service.
-
-        This method connects to the server WebSocket endpoint,
-        authenticates, and runs both the receive handler and loop concurrently.
-        """
-        # Build WebSocket URL with authentication
-        ws_url = f"{self.server_url}/ws/service?token={self.service_token}&name={self.service_name}"
-
-        self.logger.info(f"Connecting to {self.server_url}...")
-
-        try:
-            async with websockets.connect(ws_url) as websocket:
-                self.websocket = websocket
-                self._running = True
-                self.logger.info(f"Connected as '{self.service_name}'")
-
-                # Run receive handler and loop concurrently
-                receive_task = asyncio.create_task(self._receive_handler())
-                loop_task = asyncio.create_task(self._loop_handler())
-
-                # Wait for either task to complete (or fail)
-                done, pending = await asyncio.wait(
-                    [receive_task, loop_task],
-                    return_when=asyncio.FIRST_COMPLETED
-                )
-
-                # Cancel any pending tasks
-                for task in pending:
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-
-                self.logger.info("Service stopped")
-
-        except websockets.exceptions.InvalidStatusCode as e:
-            if e.status_code == 1008:
-                self.logger.error("Authentication failed: invalid or missing token")
-            else:
-                self.logger.error(f"Connection failed with status {e.status_code}")
-        except Exception as e:
-            self.logger.error(f"Connection error: {e}", exc_info=True)
-        finally:
-            self.websocket = None
-            self._running = False
+            self.logger.info("Service stopped")
 
     @classmethod
     def run_from_config(cls) -> None:
@@ -244,7 +173,7 @@ class BaseService(ABC):
         Subclasses can override this to extract service-specific settings.
 
         Args:
-            server_url: WebSocket URL of the server
+            server_url: HTTP URL of the server
             service_name: Name of the service
             service_token: Authentication token
             config: ServiceConfig instance

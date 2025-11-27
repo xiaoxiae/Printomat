@@ -27,7 +27,7 @@ class ChessPuzzleService(BaseService):
         """Initialize the chess puzzle service.
 
         Args:
-            server_url: WebSocket URL of the server
+            server_url: HTTP URL of the server
             service_name: Name to identify this service
             service_token: Authentication token for services
             print_hour: Hour of day to print (0-23, default: 8 for 8 AM)
@@ -38,16 +38,6 @@ class ChessPuzzleService(BaseService):
         self.print_hour = print_hour
         self.print_minute = print_minute
         self.print_on_start = print_on_start
-
-    async def receive(self, message: dict) -> None:
-        """Handle a message received from the server.
-
-        Args:
-            message: JSON message from the server
-        """
-        self.logger.info(f"Received message: {message}")
-        # Print puzzle when any message is received
-        await self._print_puzzle()
 
     def _fetch_puzzle_data(self) -> Optional[dict]:
         """Fetch daily puzzle from Lichess API.
@@ -206,7 +196,7 @@ class ChessPuzzleService(BaseService):
         """Create a ChessPuzzleService instance from configuration.
 
         Args:
-            server_url: WebSocket URL of the server
+            server_url: HTTP URL of the server
             service_name: Name of the service
             service_token: Authentication token
             config: ServiceConfig instance
