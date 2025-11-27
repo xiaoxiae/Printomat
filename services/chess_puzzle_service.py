@@ -83,7 +83,7 @@ class ChessPuzzleService(BaseService):
 
             # Apply moves up to the puzzle position
             for i, move in enumerate(moves):
-                if i >= initial_ply:
+                if i > initial_ply:
                     break
                 try:
                     board.push_san(move)
@@ -94,15 +94,14 @@ class ChessPuzzleService(BaseService):
             # Determine orientation (show from side to move)
             orientation = board.turn
 
-            # Get first move of solution for highlighting
+            # Get last move for highlighting and arrow
             last_move = None
-            if initial_ply > 0 and moves:
+            arrow = []
+            if len(board.move_stack) > 0:
                 try:
-                    # Create a temporary board to parse the last move
-                    temp_board = chess.Board()
-                    for i, move in enumerate(moves[:initial_ply]):
-                        temp_board.push_san(move)
-                    last_move = temp_board.peek()
+                    last_move = board.peek()
+                    # Create arrow for the last move
+                    arrow = [(last_move.from_square, last_move.to_square)]
                 except:
                     pass
 
@@ -111,6 +110,7 @@ class ChessPuzzleService(BaseService):
                 board,
                 orientation=orientation,
                 lastmove=last_move,
+                arrows=arrow,
                 size=800,
                 coordinates=True
             )
