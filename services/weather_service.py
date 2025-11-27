@@ -26,7 +26,8 @@ class WeatherService(BaseService):
     """
 
     def __init__(self, server_url: str, service_name: str, service_token: str,
-                 latitude: float, longitude: float, print_hour: int = 8, print_minute: int = 0):
+                 latitude: float, longitude: float, print_hour: int = 8, print_minute: int = 0,
+                 print_on_start: bool = False):
         """Initialize the weather service.
 
         Args:
@@ -37,12 +38,14 @@ class WeatherService(BaseService):
             longitude: Longitude for weather location
             print_hour: Hour of day to print (0-23, default: 8 for 8 AM)
             print_minute: Minute of hour to print (0-59, default: 0)
+            print_on_start: Whether to print immediately on startup (default: False)
         """
         super().__init__(server_url, service_name, service_token)
         self.latitude = latitude
         self.longitude = longitude
         self.print_hour = print_hour
         self.print_minute = print_minute
+        self.print_on_start = print_on_start
 
     async def receive(self, message: dict) -> None:
         """Handle a message received from the server.
@@ -196,6 +199,11 @@ class WeatherService(BaseService):
             f"print time={self.print_hour:02d}:{self.print_minute:02d})"
         )
 
+        # Print on startup if requested
+        if self.print_on_start:
+            self.logger.info("Printing weather on startup")
+            await self._print_weather()
+
         while True:
             # Calculate time until next print
             seconds_until_print = self._calculate_seconds_until_next_print()
@@ -229,6 +237,7 @@ class WeatherService(BaseService):
         longitude = service_config.get("longitude", 0.0)
         print_hour = service_config.get("print_hour", 8)
         print_minute = service_config.get("print_minute", 0)
+        print_on_start = service_config.get("print_on_start", False)
 
         # Validate required settings
         if latitude == 0.0 or longitude == 0.0:
@@ -242,7 +251,8 @@ class WeatherService(BaseService):
             latitude=latitude,
             longitude=longitude,
             print_hour=print_hour,
-            print_minute=print_minute
+            print_minute=print_minute,
+            print_on_start=print_on_start
         )
 
 

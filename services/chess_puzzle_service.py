@@ -23,7 +23,7 @@ class ChessPuzzleService(BaseService):
     """
 
     def __init__(self, server_url: str, service_name: str, service_token: str,
-                 print_hour: int = 8, print_minute: int = 0):
+                 print_hour: int = 8, print_minute: int = 0, print_on_start: bool = False):
         """Initialize the chess puzzle service.
 
         Args:
@@ -32,10 +32,12 @@ class ChessPuzzleService(BaseService):
             service_token: Authentication token for services
             print_hour: Hour of day to print (0-23, default: 8 for 8 AM)
             print_minute: Minute of hour to print (0-59, default: 0)
+            print_on_start: Whether to print immediately on startup (default: False)
         """
         super().__init__(server_url, service_name, service_token)
         self.print_hour = print_hour
         self.print_minute = print_minute
+        self.print_on_start = print_on_start
 
     async def receive(self, message: dict) -> None:
         """Handle a message received from the server.
@@ -181,6 +183,11 @@ class ChessPuzzleService(BaseService):
             f"Chess puzzle service started (print time={self.print_hour:02d}:{self.print_minute:02d})"
         )
 
+        # Print on startup if requested
+        if self.print_on_start:
+            self.logger.info("Printing puzzle on startup")
+            await self._print_puzzle()
+
         while True:
             # Calculate time until next print
             seconds_until_print = self._calculate_seconds_until_next_print()
@@ -212,13 +219,15 @@ class ChessPuzzleService(BaseService):
 
         print_hour = service_config.get("print_hour", 8)
         print_minute = service_config.get("print_minute", 0)
+        print_on_start = service_config.get("print_on_start", False)
 
         return cls(
             server_url=server_url,
             service_name=service_name,
             service_token=service_token,
             print_hour=print_hour,
-            print_minute=print_minute
+            print_minute=print_minute,
+            print_on_start=print_on_start
         )
 
 
