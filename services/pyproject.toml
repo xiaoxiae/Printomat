@@ -1,0 +1,13 @@
+[project]
+name = "printomat-services"
+version = "0.1.0"
+description = "Printomat services for automated printing"
+dependencies = [
+    "aiohttp",
+    "cairosvg>=2.8.2",
+    "matplotlib",
+    "pillow",
+    "python-chess>=1.999",
+    "requests",
+    "tomli",
+]
